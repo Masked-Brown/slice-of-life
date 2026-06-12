@@ -8,6 +8,7 @@ import { BAL } from '../balance.js';
 import { clamp, lerp, rand, Juice, Ease, rr } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { currentRating, pushRating, saveGame, gbp } from '../state.js';
+import { ensureNextDay, checkMilestones, goalProgress } from '../goals.js';
 import { Orders } from '../stations/order.js';
 import { Build, PIZZA_POS, TRAY, NEXT_BTN, BINS_Y } from '../stations/build.js';
 import { Oven, OVEN } from '../stations/oven.js';
@@ -21,10 +22,21 @@ const RAIL_Y = 170;
 const STAGE_RAIL = ['dough', 'sauce', 'cheese', 'toppings', 'bake', 'serve'];
 const RAIL_LABEL = { dough: 'DOUGH', sauce: 'SAUCE', cheese: 'CHEESE', toppings: 'TOPPINGS', bake: 'BAKE', serve: 'SERVE' };
 
+// always-on one-liner under the rail — what to do right now
+const STAGE_HINT = {
+  dough: 'Click the dough size from the ticket',
+  sauce: 'Hold over the pizza to pour — release in the gold band',
+  cheese: 'Hold to sprinkle — release in the gold band',
+  toppings: 'Drag pieces on — match the ×counts on the ticket',
+  tooven: 'Slide the pizza into the oven',
+  baking: 'Watch the meter — click to pull in the zone!',
+  serve: 'Ring the bell!',
+};
+
 const TUTORIAL = {
   dough: { text: 'Read the ticket, then click the matching dough ball.', x: 410, y: 320, dir: 'up' },
-  sauce: { text: 'Hold & drag over the dough to ladle sauce — match the ticket’s amount, then press NEXT.', x: 480, y: 540, dir: 'up' },
-  cheese: { text: 'Hold & drag to sprinkle cheese. Same bands: light / normal / heavy.', x: 480, y: 540, dir: 'up' },
+  sauce: { text: 'Press & HOLD over the pizza to pour sauce. Release inside the gold band on the gauge, then press NEXT.', x: 480, y: 540, dir: 'up' },
+  cheese: { text: 'Same again: HOLD to sprinkle cheese, release in the gold band.', x: 480, y: 540, dir: 'up' },
   toppings: { text: 'Drag toppings from the bins. Counts matter! Drag a piece off the pizza to remove it.', x: 560, y: 500, dir: 'down' },
   oven: { text: 'Slide the pizza into the oven, pull it out in the right zone — then ring the bell!', x: 760, y: 560, dir: 'up' },
 };
@@ -35,6 +47,7 @@ export const ServiceScene = {
 
   enter(g) {
     const state = g.state;
+    const plan = ensureNextDay(state);        // today's specials + daily goal
     svc = {
       game: g, state,
       elapsed: 0,
@@ -45,10 +58,16 @@ export const ServiceScene = {
       splats: [], crumbs: [],
       splatCount: 0,
       customers: [],
-      pending: Orders.generateDay(state),
+      pending: [],                            // filled when the day actually starts
+      dayStarted: false,
       arrivalIn: BAL.DAYS.FIRST_ARRIVAL,
       served: 0, lost: 0, sales: 0, tipsTotal: 0, sats: [],
-      prepLeft: state.boosts.prep ? BAL.BOOSTS.PREP_PIZZAS : 0,
+      usage: {}, toppingRevenue: {},          // per-topping analytics for the day
+      lowWarned: {}, outWarned: {},           // one stock warning per topping per day
+      goal: { ...plan.goal, hit: false, failed: false },
+      bonusEarned: 0,                         // goal + milestone cash won today
+      largeSold: 0, perfectsToday: 0, underPar: 0, usedTypes: new Set(),
+      prepLeft: 0,
       ratingAtStart: currentRating(state),
       orderIndex: 0,
       shownMoney: state.money,
@@ -66,11 +85,8 @@ export const ServiceScene = {
       onOrderDone: res => this._onOrderDone(res),
       advanceStage: () => this._advanceStage(),
     };
-    svc.totalCustomers = svc.pending.length;
+    svc.totalCustomers = 0;
     g._svc = svc;   // debug/testing handle
-
-    // boosts are consumed at day start
-    state.boosts = { prep: 0, ad: 0 };
 
     Build.resetForOrder(svc);
     Oven.resetDay(svc);
@@ -78,9 +94,75 @@ export const ServiceScene = {
     g.dom.hud.classList.remove('hidden');
     g.dom.ticket.classList.add('hidden');
     this._updateHUD(true);
+    this._showDayBoard(g, plan);
+  },
 
+  // the moment the player hits START DAY: consume boosts, roll the queue
+  _startDay() {
+    const g = svc.game, state = svc.state;
+    svc.prepLeft = state.boosts.prep ? BAL.BOOSTS.PREP_PIZZAS : 0;
+    svc.pending = Orders.generateDay(state);
+    svc.totalCustomers = svc.pending.length;
+    state.boosts = { prep: 0, ad: 0 };
+    svc.dayStarted = true;
+    g.dom.dayboard.classList.add('hidden');
     Juice.stamp(640, 300, `DAY ${state.day} — OPEN!`, { color: '#9fe07c', size: 52 });
     Sfx.bell();
+  },
+
+  // ---- day-start board: specials, goal, stock check ----------------------
+  _showDayBoard(g, plan) {
+    const state = g.state;
+    const el = g.dom.dayboard;
+    const specialRows = plan.specials.map(t => `
+      <div class="db-row">
+        <span class="tk-dot" style="background:${BAL.TOPPINGS[t].dot}"></span>
+        <b>${BAL.TOPPINGS[t].label}</b>
+        <span class="db-note">in demand · +${Math.round(BAL.SPECIALS.PRICE_PREMIUM * 100)}% on those orders</span>
+      </div>`).join('');
+
+    const chips = state.toppings.map(t => {
+      const n = state.stock[t] | 0;
+      const cls = n === 0 ? 'db-chip-out' : n <= BAL.STOCK.LOW_AT ? 'db-chip-low' : '';
+      return `<span class="db-chip ${cls}">${BAL.TOPPINGS[t].label} ×${n}</span>`;
+    }).join('');
+    const flagged = state.toppings.filter(t => (state.stock[t] | 0) <= BAL.STOCK.LOW_AT);
+    const stockNote = flagged.length
+      ? `<div class="db-warn">⚠ Low on ${flagged.map(t => BAL.TOPPINGS[t].label).join(', ')} — restock in the shop!</div>`
+      : `<div class="db-ok">Stock looks good ✓</div>`;
+
+    el.innerHTML = `
+      <div class="dayboard">
+        <div class="db-head">— DAY ${state.day} —</div>
+        <div class="db-section">
+          <div class="db-label">TODAY'S SPECIAL${plan.specials.length > 1 ? 'S' : ''}</div>
+          ${specialRows}
+        </div>
+        <div class="db-section">
+          <div class="db-label">DAILY GOAL</div>
+          <div class="db-row"><b>🎯 ${plan.goal.desc}</b><span class="db-reward">+${gbp(plan.goal.reward)}</span></div>
+        </div>
+        <div class="db-section">
+          <div class="db-label">STOCK CHECK</div>
+          <div class="db-chips">${chips}</div>
+          ${stockNote}
+        </div>
+        <div class="db-buttons">
+          ${state.day > 1 ? '<button class="btn" id="db-shop">⬅ BACK TO SHOP</button>' : ''}
+          <button class="btn btn-big" id="db-start">START DAY ➜</button>
+        </div>
+      </div>`;
+    el.classList.remove('hidden');
+
+    el.querySelector('#db-start').addEventListener('click', () => {
+      Sfx.press();
+      this._startDay();
+    });
+    const shopBtn = el.querySelector('#db-shop');
+    if (shopBtn) shopBtn.addEventListener('click', () => {
+      Sfx.press();
+      g.setScene('shop');
+    });
   },
 
   exit(g) {
@@ -88,6 +170,8 @@ export const ServiceScene = {
     g.dom.hud.classList.add('hidden');
     g.dom.ticket.classList.add('hidden');
     g.dom.tutorial.classList.add('hidden');
+    g.dom.dayboard.classList.add('hidden');
+    g.dom.dayboard.innerHTML = '';
     Juice.clear();
     svc = null;
   },
@@ -115,6 +199,9 @@ export const ServiceScene = {
     const grade = Build.evalStage(svc);
     const pz = svc.pizza;
     this._gradePop(grade, PIZZA_POS.x, PIZZA_POS.y - (pz ? pz.R : 100) - 24);
+    svc._pouring = false;
+    svc._wasInBand = false;        // fresh band tick for the next pour stage
+    Sfx.sauceStop();
     if (svc.stage === 'sauce') { svc.stage = 'cheese'; this._setTutorial('cheese'); }
     else if (svc.stage === 'cheese') { svc.stage = 'toppings'; this._setTutorial('toppings'); }
     else if (svc.stage === 'toppings') { svc.stage = 'tooven'; this._setTutorial('oven'); }
@@ -134,7 +221,17 @@ export const ServiceScene = {
     svc.stage = 'serve';
   },
 
-  _onOrderDone() {
+  _onOrderDone(res) {
+    // daily-goal + milestone bookkeeping (ticket is still pinned here)
+    if (res) {
+      const t = svc.ticket;
+      if (t && t.size === 'L') svc.largeSold++;
+      if (res.perfect) svc.perfectsToday++;
+      if (res.elapsed <= res.par) svc.underPar++;
+      for (const k in svc.usage) if (svc.usage[k] > 0) svc.usedTypes.add(k);
+      this._checkGoal();
+      this._checkMilestones();
+    }
     Orders.unpinTicket(svc);
     svc.ticket = null;
     svc.stage = 'idle';
@@ -142,10 +239,49 @@ export const ServiceScene = {
     this._updateHUD();
   },
 
+  _checkGoal() {
+    const goal = svc.goal;
+    if (!goal || goal.hit || goal.failed) return;
+    const p = goalProgress(goal, svc);
+    if (p.failed) { goal.failed = true; return; }
+    if (p.done) {
+      goal.hit = true;
+      svc.state.money += goal.reward;
+      svc.bonusEarned += goal.reward;
+      const g = svc.game;
+      Juice.stamp(640, 270, 'DAILY GOAL!', { color: '#9fe07c', size: 46 });
+      Juice.floatText(640, 330, '+' + gbp(goal.reward), { color: '#ffd54a', size: 28 });
+      Juice.coinBurst(640, 300, g.hudMoneyPos.x, g.hudMoneyPos.y, 8, () => Sfx.coin());
+      Sfx.goalDing();
+    }
+  },
+
+  _checkMilestones() {
+    const hit = checkMilestones(svc.state);
+    const g = svc.game;
+    hit.forEach((def, i) => {
+      svc.state.money += def.reward;
+      svc.bonusEarned += def.reward;
+      Juice.tween({
+        dur: 0.01, delay: 0.55 * i,
+        onDone: () => {
+          Juice.stamp(640, 215, `MILESTONE!`, { color: '#ffd54a', size: 42 });
+          Juice.floatText(640, 268, def.label, { color: '#fff6e0', size: 22 });
+          Juice.floatText(640, 300, '+' + gbp(def.reward), { color: '#9fe07c', size: 26 });
+          Juice.coinBurst(640, 250, g.hudMoneyPos.x, g.hudMoneyPos.y, 10, () => Sfx.coin());
+          Juice.confetti(640, 235, 22);
+          Sfx.fanfare();
+        },
+      });
+    });
+  },
+
   _onStormOut(c, wasFront) {
     svc.lost++;
     pushRating(svc.state, 1);
+    if (c.regular) pushRating(svc.state, 1);   // letting a regular walk stings double
     if (wasFront) this._abortOrder();
+    this._checkGoal();                         // a storm-out sinks 'no walk-outs'
     this._updateHUD();
   },
 
@@ -159,8 +295,13 @@ export const ServiceScene = {
       Sfx.ovenStop();
       Juice.tween({ target: svc.oven, to: { door: 0 }, dur: 0.3 });
     }
+    // a held piece goes back in its bin; pieces on the binned pizza are spent
+    if (svc.held) {
+      svc.state.stock[svc.held.type] = (svc.state.stock[svc.held.type] | 0) + svc.held.n;
+    }
     const pz = svc.pizza;
     if (pz) {
+      for (const t of pz.toppings) svc.usage[t.type] = (svc.usage[t.type] || 0) + 1;
       Juice.killTweensOf(pz);
       pz.state = 'fly';
       Juice.tween({
@@ -203,6 +344,7 @@ export const ServiceScene = {
     if (svc.pending.length === 0 && svc.customers.length === 0 && svc.stage === 'idle'
         && (svc.served + svc.lost) >= svc.totalCustomers && svc.totalCustomers > 0) {
       svc.dayEndQueued = true;
+      this._checkGoal();           // all-day goals (no walk-outs, 90% sat) settle now
       const stats = {
         day: svc.state.day,
         served: svc.served, lost: svc.lost,
@@ -210,6 +352,10 @@ export const ServiceScene = {
         satAvg: svc.sats.length ? svc.sats.reduce((a, b) => a + b, 0) / svc.sats.length : 0,
         ratingBefore: svc.ratingAtStart,
         ratingAfter: currentRating(svc.state),
+        used: svc.usage, toppingRevenue: svc.toppingRevenue,
+        bonus: svc.bonusEarned,
+        goalHit: !!svc.goal.hit,
+        goalDesc: svc.goal.desc, goalReward: svc.goal.reward,
       };
       Juice.tween({ dur: 1.1, onDone: () => g.setScene('dayEnd', stats) });
     }
@@ -239,6 +385,19 @@ export const ServiceScene = {
 
     const progTxt = `Served ${svc.served + svc.lost} / ${svc.totalCustomers}`;
     if (force || d.hudProgress.textContent !== progTxt) d.hudProgress.textContent = progTxt;
+
+    // daily goal pill
+    if (svc.goal) {
+      const p = goalProgress(svc.goal, svc);
+      const goalTxt = svc.goal.hit ? `🎯 ${svc.goal.short} ✓`
+        : svc.goal.failed ? `🎯 ${svc.goal.short} ✗`
+        : `🎯 ${svc.goal.short} · ${p.prog}/${p.target}`;
+      if (force || d.hudGoal.textContent !== goalTxt) {
+        d.hudGoal.textContent = goalTxt;
+        d.hudGoal.classList.toggle('hud-goal-done', svc.goal.hit);
+        d.hudGoal.classList.toggle('hud-goal-failed', svc.goal.failed);
+      }
+    }
 
     const rating = currentRating(s);
     d.hudStars.style.width = (rating / 5 * 100) + '%';
@@ -363,10 +522,18 @@ export const ServiceScene = {
     const tier = svc.state.upgrades.decor;
     const W = g.W;
 
-    // wall behind the queue
+    // wall behind the queue — warm two-tone with depth
     const wallColors = ['#e8d5ae', '#f2d9b0', '#f6e0bb', '#fbe7c4'];
-    ctx.fillStyle = wallColors[tier];
+    const wallLo = ['#dcc497', '#e6c898', '#eccfa2', '#f1d6ab'];
+    const wg = ctx.createLinearGradient(0, 0, 0, 152);
+    wg.addColorStop(0, wallColors[tier]);
+    wg.addColorStop(1, wallLo[tier]);
+    ctx.fillStyle = wg;
     ctx.fillRect(0, 0, W, 152);
+
+    // picture rail
+    ctx.fillStyle = 'rgba(74,46,29,0.18)';
+    ctx.fillRect(0, 140, W, 4);
 
     // accent paint band grows fancier with decor tier
     if (tier >= 1) {
@@ -380,6 +547,136 @@ export const ServiceScene = {
         ctx.moveTo(x, 16); ctx.lineTo(x + 18, 34); ctx.lineTo(x + 36, 16);
         ctx.closePath(); ctx.fill();
       }
+    }
+
+    ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE;
+
+    // window onto the street (daylight, rooftops)
+    ctx.save();
+    ctx.fillStyle = '#9c6b3c';
+    rr(ctx, 96, 26, 168, 104, 10); ctx.fill(); ctx.stroke();
+    rr(ctx, 106, 36, 148, 84, 6);
+    ctx.save();
+    ctx.clip();
+    const sky = ctx.createLinearGradient(0, 36, 0, 120);
+    sky.addColorStop(0, '#aed7ec');
+    sky.addColorStop(1, '#dceef7');
+    ctx.fillStyle = sky;
+    ctx.fillRect(106, 36, 148, 84);
+    // sun + drifting cloud
+    ctx.fillStyle = '#ffe9a8';
+    ctx.beginPath(); ctx.arc(232, 54, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    const cx = 120 + ((svc.elapsed * 3) % 180);
+    for (const [dx, r] of [[-14, 8], [0, 11], [14, 8]]) {
+      ctx.beginPath(); ctx.arc(cx + dx, 62, r, 0, Math.PI * 2); ctx.fill();
+    }
+    // rooftop silhouettes
+    ctx.fillStyle = '#b98a64';
+    ctx.beginPath();
+    ctx.moveTo(106, 120);
+    ctx.lineTo(106, 96); ctx.lineTo(130, 84); ctx.lineTo(154, 96);
+    ctx.lineTo(154, 104); ctx.lineTo(176, 104); ctx.lineTo(176, 88);
+    ctx.lineTo(204, 76); ctx.lineTo(232, 88); ctx.lineTo(232, 120);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    rr(ctx, 106, 36, 148, 84, 6); ctx.stroke();
+    // crossbars
+    ctx.fillStyle = '#9c6b3c';
+    ctx.fillRect(178, 36, 5, 84);
+    ctx.fillRect(106, 74, 148, 5);
+    ctx.restore();
+
+    // hanging menu board
+    ctx.save();
+    ctx.strokeStyle = '#8a6f4f'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(396, 0); ctx.lineTo(404, 26); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(504, 0); ctx.lineTo(496, 26); ctx.stroke();
+    ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE;
+    ctx.fillStyle = '#4a3526';
+    rr(ctx, 380, 26, 140, 74, 8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#3a2a1e';
+    rr(ctx, 388, 34, 124, 58, 5); ctx.fill();
+    ctx.fillStyle = '#fdf3dd';
+    ctx.font = '900 17px Trebuchet MS, system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('M E N U', 450, 50);
+    // chalk pizza doodle + squiggles
+    ctx.strokeStyle = 'rgba(253,243,221,0.75)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(412, 74, 10, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(404, 67); ctx.lineTo(420, 81); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(430, 70); ctx.lineTo(496, 70); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(430, 80); ctx.lineTo(482, 80); ctx.stroke();
+    ctx.restore();
+
+    // wooden shelf above the oven, stacked with supplies
+    ctx.save();
+    ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE;
+    // jars of passata
+    for (const jx of [968, 1000]) {
+      ctx.fillStyle = '#c23a1c';
+      rr(ctx, jx, 92, 24, 34, 5); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#8d8d96';
+      rr(ctx, jx + 2, 86, 20, 9, 3); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.fillRect(jx + 4, 98, 5, 22);
+    }
+    // olive jar
+    ctx.fillStyle = '#5d6e3a';
+    rr(ctx, 1036, 96, 22, 30, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#8d8d96';
+    rr(ctx, 1038, 90, 18, 9, 3); ctx.fill(); ctx.stroke();
+    // oil bottle
+    ctx.fillStyle = '#d9a429';
+    rr(ctx, 1072, 84, 14, 42, 5); ctx.fill(); ctx.stroke();
+    rr(ctx, 1075, 72, 8, 14, 3); ctx.fill(); ctx.stroke();
+    // flour sack
+    ctx.fillStyle = '#efe3c8';
+    ctx.beginPath();
+    ctx.moveTo(1106, 126);
+    ctx.quadraticCurveTo(1102, 92, 1112, 86);
+    ctx.quadraticCurveTo(1124, 78, 1138, 86);
+    ctx.quadraticCurveTo(1148, 92, 1144, 126);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#a3886a';
+    ctx.font = '900 11px Trebuchet MS, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('00', 1125, 110);
+    // stack of pizza boxes
+    ctx.fillStyle = '#d9b988';
+    for (let i = 0; i < 3; i++) {
+      rr(ctx, 1166, 110 - i * 13, 58, 12, 3); ctx.fill(); ctx.stroke();
+    }
+    // the shelf board itself
+    ctx.fillStyle = '#8a5a34';
+    rr(ctx, 944, 124, 292, 12, 5); ctx.fill(); ctx.stroke();
+    // brackets
+    ctx.fillStyle = '#6e4226';
+    ctx.fillRect(960, 136, 8, 10);
+    ctx.fillRect(1212, 136, 8, 10);
+    ctx.restore();
+
+    // string lights from decor tier 2
+    if (tier >= 2) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(74,46,29,0.5)'; ctx.lineWidth = 2.5;
+      for (let seg = 0; seg < 3; seg++) {
+        const x0 = 280 + seg * 230, x1 = x0 + 230;
+        ctx.beginPath();
+        ctx.moveTo(x0, 8);
+        ctx.quadraticCurveTo((x0 + x1) / 2, 34, x1, 8);
+        ctx.stroke();
+        for (let i = 1; i < 6; i++) {
+          const t = i / 6;
+          const lx = lerp(x0, x1, t);
+          const ly = 8 + 2 * (34 - 8) * t * (1 - t) + 5;
+          const tw = 0.7 + 0.3 * Math.sin(svc.elapsed * 2 + seg * 2 + i);
+          ctx.fillStyle = `rgba(255,213,74,${0.55 + 0.45 * tw})`;
+          ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      ctx.restore();
+      ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE;
     }
 
     // door (far left) — where customers come and go
@@ -482,6 +779,16 @@ export const ServiceScene = {
         ctx.globalAlpha = 1;
       }
       x += w + 14;
+    }
+
+    // what-to-do hint for the current stage
+    const hint = STAGE_HINT[svc.stage];
+    if (hint) {
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = '#fff6e0';
+      ctx.font = '800 13.5px Trebuchet MS, system-ui, sans-serif';
+      ctx.fillText(hint, 640, RAIL_Y + 20);
+      ctx.globalAlpha = 1;
     }
     ctx.restore();
   },

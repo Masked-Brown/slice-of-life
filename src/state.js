@@ -10,18 +10,28 @@ export const SAVE_KEY = 'slice-of-life-save-v1';
 
 export function newGame(muted = false) {
   return {
-    version: 1,
+    version: 2,
     phase: 'service',            // 'service' | 'shop' — where Continue resumes
     day: 1,
     money: BAL.ECONOMY.START_MONEY,
     recentRatings: [],           // last N customer star ratings (rolling window)
-    upgrades: { oven: 0, ladle: 0, shaker: 0, tongs: 0, decor: 0 },
+    upgrades: { oven: 0, ladle: 0, shaker: 0, tongs: 0, decor: 0, supply: 0 },
     toppings: ['pepperoni', 'mushroom'],
     sizeL: false,
     boosts: { prep: 0, ad: 0 },  // bought for tomorrow; consumed at day start
     tutorialDone: false,
     muted,
-    stats: { lifetimeServed: 0, lifetimeEarned: 0 },
+    stats: {
+      lifetimeServed: 0, lifetimeEarned: 0,
+      lifetimePerfects: 0, perfectStreak: 0, bestPerfectStreak: 0,
+      bestDayProfit: 0,
+    },
+    // V2: stock & business layer
+    stock: { pepperoni: BAL.STOCK.START, mushroom: BAL.STOCK.START },
+    carriedRestockSpend: 0,      // £ spent restocking for the upcoming day
+    milestonesDone: {},          // { milestoneId: true }
+    nextDay: null,               // { day, specials, goal } — filled by goals.ensureNextDay
+    lastDay: null,               // last session's analytics record (see dayEnd.js)
   };
 }
 
@@ -34,10 +44,28 @@ export function loadGame() {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw);
-    if (!s || s.version !== 1) return null;
-    // merge over a fresh state so missing fields never crash older saves
-    return { ...newGame(), ...s, upgrades: { ...newGame().upgrades, ...s.upgrades } };
+    if (!s || (s.version !== 1 && s.version !== 2)) return null;
+    return migrate(s);
   } catch { return null; }
+}
+
+// merge over a fresh state so missing fields never crash older saves;
+// v1 saves gain stock for every owned topping
+export function migrate(s) {
+  const fresh = newGame();
+  const out = {
+    ...fresh, ...s,
+    version: 2,
+    upgrades: { ...fresh.upgrades, ...s.upgrades },
+    stats: { ...fresh.stats, ...s.stats },
+    boosts: { ...fresh.boosts, ...s.boosts },
+    stock: { ...s.stock },
+    milestonesDone: { ...s.milestonesDone },
+  };
+  for (const t of out.toppings) {
+    if (!(t in out.stock)) out.stock[t] = BAL.STOCK.START;
+  }
+  return out;
 }
 
 export function hasSave() {
@@ -80,6 +108,13 @@ export function queueSlots(state) {
 
 export function patienceMult(state) {
   return 1 + state.upgrades.decor * BAL.PATIENCE.DECOR_BONUS;
+}
+
+// ---- stock helpers -----------------------------------------------------
+// £/piece after the supply-deal discount
+export function unitCost(state, topping) {
+  const disc = BAL.SUPPLY_DISCOUNTS[state.upgrades.supply] || 0;
+  return BAL.TOPPINGS[topping].unit * (1 - disc);
 }
 
 // ---- formatting -----------------------------------------------------------

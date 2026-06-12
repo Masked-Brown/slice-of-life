@@ -122,6 +122,15 @@ export const Sfx = {
 
   cheeseTick() { noiseHit({ dur: 0.03, vol: 0.05, hp: 2600 }); },
 
+  // the needle just entered the ticket's band
+  bandTick() { blip({ type: 'sine', f0: 990, dur: 0.12, vol: 0.08, noVary: true }); },
+
+  // a topping bin just went low
+  warn() {
+    blip({ type: 'triangle', f0: 330, f1: 245, dur: 0.16, vol: 0.12 });
+    blip({ type: 'triangle', f0: 330, f1: 245, dur: 0.16, vol: 0.1, delay: 0.18 });
+  },
+
   pluck() { blip({ type: 'sine', f0: 340, f1: 230, dur: 0.07, vol: 0.13 }); },
   pat() { noiseHit({ dur: 0.06, vol: 0.12, lp: 950 }); },
 
@@ -215,5 +224,18 @@ export const Sfx = {
   buy() {
     blip({ type: 'sine', f0: 660, dur: 0.09, vol: 0.1, noVary: true });
     blip({ type: 'sine', f0: 880, dur: 0.16, vol: 0.1, delay: 0.07, noVary: true });
+  },
+
+  // ---- goals & milestones ---------------------------------------------------
+  goalDing() {
+    blip({ type: 'sine', f0: 880, dur: 0.18, vol: 0.12, noVary: true });
+    blip({ type: 'sine', f0: 1175, dur: 0.3, vol: 0.11, delay: 0.1, noVary: true });
+    noiseHit({ dur: 0.06, vol: 0.05, hp: 3500, delay: 0.1 });
+  },
+  fanfare() {
+    const notes = [659, 784, 988, 1319];
+    notes.forEach((f, i) => blip({ type: 'triangle', f0: f, dur: 0.3, vol: 0.12, delay: i * 0.08, noVary: true }));
+    blip({ type: 'sine', f0: 1568, dur: 0.5, vol: 0.08, delay: 0.34, noVary: true });
+    noiseHit({ dur: 0.25, vol: 0.05, hp: 4200, delay: 0.3 });
   },
 };

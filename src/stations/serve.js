@@ -106,8 +106,9 @@ export const Score = {
     const satisfaction = Math.round(clamp(accuracy * lerp(S.SPEED_FLOOR, 1, speedK), 0, 100));
 
     // money
-    const price = (E.BASE_PRICE[ticket.size] + E.PRICE_PER_TOPPING_TYPE * ticket.toppings.length)
+    let price = (E.BASE_PRICE[ticket.size] + E.PRICE_PER_TOPPING_TYPE * ticket.toppings.length)
       * priceMultiplier(state);
+    if (ticket.special) price *= 1 + BAL.SPECIALS.PRICE_PREMIUM;
     const pay = price * lerp(E.SAT_MULT_MIN, E.SAT_MULT_MAX, satisfaction / 100);
     let tipFrac = 0;
     if (satisfaction >= E.TIP_START_SAT) {
@@ -125,7 +126,7 @@ export const Score = {
 
     return {
       accuracy: Math.round(accuracy), satisfaction, perfect, burnt: bake.burnt,
-      pay, tip, stars, par,
+      pay, tip, stars, par, price, elapsed,
       breakdown: { sizeFrac, sauceFrac, cheeseFrac, topFrac: top.frac, bakeFrac: bake.frac },
     };
   },
@@ -159,19 +160,42 @@ export const Serve = {
     Juice.tween({
       target: pz, to: { x: cust.x, y: cust.y + 26, scale: 0.45 },
       dur: 0.45, ease: (t) => t * t * (3 - 2 * t),
-      onDone: () => this._payout(svc, cust, res),
+      onDone: () => this._payout(svc, cust, res, pz),
     });
   },
 
-  _payout(svc, cust, res) {
+  _payout(svc, cust, res, pz) {
     const g = svc.game, state = svc.state;
+    const E = BAL.ECONOMY;
     svc.pizza = null;
+
+    // analytics: pieces consumed + revenue attributed per topping type
+    for (const t of pz.toppings) svc.usage[t.type] = (svc.usage[t.type] || 0) + 1;
+    const satMult = lerp(E.SAT_MULT_MIN, E.SAT_MULT_MAX, res.satisfaction / 100);
+    for (const w of cust.ticket.toppings) {
+      svc.toppingRevenue[w.type] = (svc.toppingRevenue[w.type] || 0)
+        + E.PRICE_PER_TOPPING_TYPE * priceMultiplier(state) * satMult;
+    }
+
+    // nailing a regular's order earns a fat extra tip; their word counts double
+    const R = BAL.REGULARS;
+    if (cust.regular && res.satisfaction >= R.SAT_THRESHOLD) {
+      res.tip += res.price * R.TIP_BONUS_FRAC;
+    }
 
     const total = res.pay + res.tip;
     state.money += total;
     state.stats.lifetimeServed++;
     state.stats.lifetimeEarned += total;
+    if (res.perfect) {
+      state.stats.lifetimePerfects++;
+      state.stats.perfectStreak++;
+      state.stats.bestPerfectStreak = Math.max(state.stats.bestPerfectStreak, state.stats.perfectStreak);
+    } else {
+      state.stats.perfectStreak = 0;
+    }
     pushRating(state, res.stars);
+    if (cust.regular) pushRating(state, res.stars);
     svc.served++;
     svc.sales += res.pay;
     svc.tipsTotal += res.tip;
@@ -192,6 +216,16 @@ export const Serve = {
     // customer reaction
     const mood = res.satisfaction >= 80 ? 'delighted' : res.satisfaction >= 50 ? 'fine' : 'grumpy';
     if (mood === 'grumpy') Sfx.grumpy();
+
+    // regulars react personally — bigger delight, deeper disappointment
+    if (cust.regular) {
+      if (res.satisfaction >= R.SAT_THRESHOLD) {
+        Juice.floatText(cust.x, cust.y - 124, `${cust.regular.name} loves it!`, { color: '#9fe07c', size: 20 });
+        Juice.sparkle(cust.x, cust.y - 44, 10);
+      } else if (res.satisfaction < 50) {
+        Juice.floatText(cust.x, cust.y - 124, `${cust.regular.name} is let down…`, { color: '#ff8a70', size: 18 });
+      }
+    }
 
     if (res.perfect) {
       Juice.slowMo(0.15);

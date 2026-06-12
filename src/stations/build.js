@@ -51,12 +51,12 @@ export const Build = {
     svc.held = null;
     svc.splatCount = 0;
     svc.ghostPts = null;
-    svc._saucing = false;
-    svc._cheesing = false;
-    svc._covTimer = 0;
+    svc._pouring = false;        // hold-to-pour active (sauce or cheese)
+    svc._pourCov = 0;            // sauce coverage % driven by hold time
+    svc._wasInBand = false;      // for the band-entry tick
     svc._splatCD = 0;
     svc._cheeseAcc = 0;
-    svc._lastPaint = null;
+    svc._binShake = null;        // { type, t } — empty-bin feedback wobble
   },
 
   makePizza(size) {
@@ -72,8 +72,8 @@ export const Build = {
       size, R,
       x: PIZZA_POS.x, y: PIZZA_POS.y,
       scale: 1, sx: 1, sy: 1, rot: 0,
-      sauceCanvas: c, sauceCtx: c.getContext('2d', { willReadFrequently: true }),
-      sauceCoverage: 0, sauceDirty: false,
+      sauceCanvas: c, sauceCtx: c.getContext('2d'),
+      sauceCoverage: 0,
       cheese: [],
       toppings: [],
       bake: 0, bakeZone: 'raw',
@@ -117,105 +117,123 @@ export const Build = {
   // ---- per-frame -------------------------------------------------------
   update(svc, dt) {
     const pz = svc.pizza;
-    const p = svc.game.pointer;
 
     if (svc._splatCD > 0) svc._splatCD -= dt;
+    if (svc._binShake && (svc._binShake.t -= dt) <= 0) svc._binShake = null;
 
-    // sauce painting
-    if (svc.stage === 'sauce' && svc._saucing && pz) {
-      this._paintTo(svc, p.x, p.y);
-      svc._covTimer -= dt;
-      if (pz.sauceDirty && svc._covTimer <= 0) {
-        svc._covTimer = 0.12;
-        this._computeCoverage(pz);
-      }
-    }
-
-    // cheese sprinkling
-    if (svc.stage === 'cheese' && svc._cheesing && pz) {
-      const tier = svc.state.upgrades.shaker;
-      svc._cheeseAcc += BAL.PIZZA.CHEESE_RATE[tier] * dt;
-      const spread = BAL.PIZZA.CHEESE_SPREAD[tier];
-      while (svc._cheeseAcc >= 1) {
-        svc._cheeseAcc -= 1;
-        this._dropCheese(svc, p.x + rand(-spread, spread), p.y + rand(-spread, spread) + 18);
-      }
-    }
+    // hold-to-pour: coverage grows from the centre while held
+    if (svc.stage === 'sauce' && svc._pouring && pz) this._updateSaucePour(svc, dt);
+    if (svc.stage === 'cheese' && svc._pouring && pz) this._updateCheesePour(svc, dt);
   },
 
-  _paintTo(svc, x, y) {
+  // current amount % for the active pour stage (drives gauge + band logic)
+  pourPct(svc) {
     const pz = svc.pizza;
-    const last = svc._lastPaint || { x, y };
-    const brush = BAL.PIZZA.SAUCE_BRUSH[svc.state.upgrades.ladle];
-    const step = brush * 0.4;
-    const d = dist(last.x, last.y, x, y);
-    const n = Math.max(1, Math.ceil(d / step));
-    for (let i = 1; i <= n; i++) {
-      const px = lerp(last.x, x, i / n), py = lerp(last.y, y, i / n);
-      this._dab(svc, px, py, brush);
-    }
-    svc._lastPaint = { x, y };
+    if (!pz) return 0;
+    return svc.stage === 'sauce' ? pz.sauceCoverage : Score.cheesePct(pz);
   },
 
-  _dab(svc, x, y, brush) {
-    const pz = svc.pizza;
-    const lx = x - pz.x, ly = y - pz.y;
-    const rim = pz.R * BAL.PIZZA.SAUCE_RIM;
-    const d = Math.hypot(lx, ly);
+  _inTicketBand(bandName, pct) {
+    const [lo, hi] = BAL.SCORE.BANDS[bandName];
+    return pct >= lo && pct <= hi;
+  },
 
-    if (d < rim + brush * 0.6) {
-      const c = pz.sauceCtx;
-      c.save();
-      c.beginPath(); c.arc(HALF, HALF, rim, 0, Math.PI * 2); c.clip();
-      const grad = c.createRadialGradient(HALF + lx, HALF + ly, brush * 0.15, HALF + lx, HALF + ly, brush);
-      grad.addColorStop(0, 'rgba(214,72,34,1)');
-      grad.addColorStop(0.75, 'rgba(196,56,24,0.98)');
-      grad.addColorStop(1, 'rgba(158,38,14,0.9)');
-      c.fillStyle = grad;
-      c.beginPath(); c.arc(HALF + lx, HALF + ly, brush, 0, Math.PI * 2); c.fill();
-      c.restore();
-      pz.sauceDirty = true;
-    } else if (d > pz.R * 1.04 && svc._splatCD <= 0 && y > 200 && y < 580) {
-      // over the edge → counter splat (cosmetic + small accuracy ding)
-      svc._splatCD = 0.45;
+  // the tick the moment the needle enters the ticket's band
+  _bandFeedback(svc, bandName, pct) {
+    const inBand = this._inTicketBand(bandName, pct);
+    if (inBand && !svc._wasInBand) Sfx.bandTick();
+    svc._wasInBand = inBand;
+  },
+
+  _updateSaucePour(svc, dt) {
+    const pz = svc.pizza;
+    const P = BAL.POUR;
+    const tier = svc.state.upgrades.ladle;
+    const band = svc.ticket.sauce;
+    const inBand = this._inTicketBand(band, svc._pourCov);
+    const rate = P.SAUCE_RATE[tier] * (inBand ? P.IN_BAND_SLOW[tier] : 1);
+    svc._pourCov = clamp(svc._pourCov + rate * 100 * dt, 0, 100);
+    pz.sauceCoverage = svc._pourCov;
+    this._paintSauce(svc, pz);
+    this._bandFeedback(svc, band, svc._pourCov);
+
+    // holding past full slops sauce onto the counter
+    if (svc._pourCov >= 99.5 && svc._splatCD <= 0) {
+      svc._splatCD = P.OVERPOUR_SPLAT_CD;
       svc.splatCount++;
-      if (svc.splats.length < 14) {
-        svc.splats.push({ x, y, r: rand(8, 15), rot: rand(0, 6) });
-      }
-      Juice.splat(x, y, '#c23a1c', 5);
+      const a = rand(0, Math.PI * 2);
+      const sx = pz.x + Math.cos(a) * (pz.R * 1.08 + rand(4, 30));
+      const sy = clamp(pz.y + Math.sin(a) * (pz.R * 0.8 + rand(4, 26)), 210, 575);
+      if (svc.splats.length < 14) svc.splats.push({ x: sx, y: sy, r: rand(8, 15), rot: rand(0, 6) });
+      Juice.splat(sx, sy, '#c23a1c', 5);
       Sfx.pat();
     }
   },
 
-  _computeCoverage(pz) {
-    pz.sauceDirty = false;
+  // visual only — coverage % is authoritative, the canvas just looks the part
+  _paintSauce(svc, pz) {
     const rim = pz.R * BAL.PIZZA.SAUCE_RIM;
-    const data = pz.sauceCtx.getImageData(0, 0, SAUCE_CANVAS, SAUCE_CANVAS).data;
-    let painted = 0, total = 0;
-    const step = 3, r2 = rim * rim;
-    for (let yy = 0; yy < SAUCE_CANVAS; yy += step) {
-      const dy = yy - HALF;
-      for (let xx = 0; xx < SAUCE_CANVAS; xx += step) {
-        const dx = xx - HALF;
-        if (dx * dx + dy * dy > r2) continue;
-        total++;
-        if (data[(yy * SAUCE_CANVAS + xx) * 4 + 3] > 40) painted++;
-      }
+    const targetR = rim * Math.sqrt(svc._pourCov / 100);
+    if (targetR < 3) return;
+    const c = pz.sauceCtx;
+    c.save();
+    c.beginPath(); c.arc(HALF, HALF, rim, 0, Math.PI * 2); c.clip();
+    // solid wet core
+    c.fillStyle = 'rgba(199,58,25,0.98)';
+    c.beginPath(); c.arc(HALF, HALF, targetR * 0.98, 0, Math.PI * 2); c.fill();
+    // organic rim dabs so the edge spreads unevenly, like real sauce
+    for (let i = 0; i < 9; i++) {
+      const a = rand(0, Math.PI * 2);
+      const r = targetR * rand(0.84, 1.05);
+      const dabR = Math.max(6, targetR * rand(0.12, 0.22));
+      const dx = HALF + Math.cos(a) * r, dy = HALF + Math.sin(a) * r;
+      const grad = c.createRadialGradient(dx, dy, dabR * 0.15, dx, dy, dabR);
+      grad.addColorStop(0, 'rgba(214,72,34,1)');
+      grad.addColorStop(0.75, 'rgba(196,56,24,0.95)');
+      grad.addColorStop(1, 'rgba(158,38,14,0)');
+      c.fillStyle = grad;
+      c.beginPath(); c.arc(dx, dy, dabR, 0, Math.PI * 2); c.fill();
     }
-    pz.sauceCoverage = total ? (painted / total) * 100 : 0;
+    // darker simmer spots for texture
+    if (Math.random() < 0.35) {
+      const a = rand(0, Math.PI * 2), r = targetR * Math.sqrt(Math.random()) * 0.8;
+      c.fillStyle = 'rgba(158,38,14,0.5)';
+      c.beginPath();
+      c.arc(HALF + Math.cos(a) * r, HALF + Math.sin(a) * r, rand(4, 9), 0, Math.PI * 2);
+      c.fill();
+    }
+    c.restore();
   },
 
-  _dropCheese(svc, x, y) {
+  _updateCheesePour(svc, dt) {
     const pz = svc.pizza;
-    const lx = x - pz.x, ly = y - pz.y;
-    const fleck = { x: lx, y: ly, rot: rand(0, Math.PI), len: rand(6, 11), shade: Math.random(), s: 0 };
-    if (Math.hypot(lx, ly) < pz.R * 0.88 && pz.cheese.length < 430) {
-      pz.cheese.push(fleck);
-      Juice.tween({ target: fleck, to: { s: 1 }, dur: 0.18, ease: Ease.outBack });
-      if (pz.cheese.length % 4 === 0) Sfx.cheeseTick();
-    } else if (svc.crumbs.length < 26 && Math.random() < 0.3) {
-      svc.crumbs.push({ x, y, rot: rand(0, Math.PI), len: rand(5, 9) });
+    const P = BAL.POUR;
+    const tier = svc.state.upgrades.shaker;
+    const band = svc.ticket.cheese;
+    const pct = Score.cheesePct(pz);
+    const inBand = this._inTicketBand(band, pct);
+    const rate = P.CHEESE_RATE[tier] * (inBand ? P.IN_BAND_SLOW[tier] : 1);
+    svc._cheeseAcc += rate * dt;
+    const full = BAL.PIZZA.CHEESE_FULL * BAL.PIZZA.SIZE_FACTOR[pz.size];
+    while (svc._cheeseAcc >= 1) {
+      svc._cheeseAcc -= 1;
+      // flecks land from the centre outward as the pile grows
+      const fillFrac = clamp(pz.cheese.length / full, 0, 1);
+      const r = pz.R * 0.85 * Math.sqrt(Math.random()) * (0.4 + 0.6 * fillFrac);
+      const a = rand(0, Math.PI * 2);
+      this._dropCheese(svc, Math.cos(a) * r, Math.sin(a) * r);
     }
+    this._bandFeedback(svc, band, Score.cheesePct(pz));
+  },
+
+  // lx/ly are pizza-local coordinates
+  _dropCheese(svc, lx, ly) {
+    const pz = svc.pizza;
+    if (pz.cheese.length >= 430) return;
+    const fleck = { x: lx, y: ly, rot: rand(0, Math.PI), len: rand(6, 11), shade: Math.random(), s: 0 };
+    pz.cheese.push(fleck);
+    Juice.tween({ target: fleck, to: { s: 1 }, dur: 0.18, ease: Ease.outBack });
+    if (pz.cheese.length % 4 === 0) Sfx.cheeseTick();
   },
 
   // ---- pointer ------------------------------------------------------------
@@ -244,13 +262,16 @@ export const Build = {
         }
       }
     } else if (st === 'sauce') {
-      svc._saucing = true;
-      svc._lastPaint = { x, y };
-      Sfx.sauceStart();
-      this._paintTo(svc, x, y);
+      // press & hold near the pizza to pour from the centre
+      if (pz && dist(x, y, pz.x, pz.y) < pz.R * 1.35) {
+        svc._pouring = true;
+        Sfx.sauceStart();
+      }
     } else if (st === 'cheese') {
-      svc._cheesing = true;
-      svc._cheeseAcc = 1;
+      if (pz && dist(x, y, pz.x, pz.y) < pz.R * 1.35) {
+        svc._pouring = true;
+        svc._cheeseAcc = 1;
+      }
     } else if (st === 'toppings') {
       // pick up a placed piece (topmost first)
       if (pz) {
@@ -264,15 +285,26 @@ export const Build = {
           }
         }
       }
-      // grab from a bin
+      // grab from a bin (stock permitting)
       const bin = this._binAt(svc, x, y);
       if (bin) {
+        const stock = svc.state.stock[bin.type] | 0;
+        if (stock <= 0) {
+          // empty bin — the order has to go out without it
+          svc._binShake = { type: bin.type, t: 0.4 };
+          Juice.floatText(bin.x + bin.w / 2, bin.y - 30,
+            `Out of ${BAL.TOPPINGS[bin.type].label}!`, { color: '#ff8a70', size: 17 });
+          Sfx.popOff();
+          return;
+        }
         let n = 1;
-        if (svc.state.upgrades.tongs >= 3) {
+        if (svc.state.upgrades.tongs >= 3 && stock >= 2) {
           const w = this._needed(svc, bin.type);
           const placed = pz ? pz.toppings.filter(t => t.type === bin.type).length : 0;
           if (w != null && w - placed >= 2) n = 2; // double-grab when ≥2 still needed
         }
+        svc.state.stock[bin.type] -= n;
+        this._stockWarning(svc, bin.type);
         svc.held = { type: bin.type, x, y, n };
         Sfx.pluck();
       }
@@ -288,7 +320,6 @@ export const Build = {
 
   onMove(svc, x, y) {
     const pz = svc.pizza;
-    if (svc._saucing) this._paintTo(svc, x, y);
     if (svc.held) { svc.held.x = x; svc.held.y = y; }
     if (pz && pz.state === 'drag') {
       pz.x = x + pz.dragOff.x;
@@ -317,24 +348,24 @@ export const Build = {
       return;
     }
 
-    if (svc._saucing) {
-      svc._saucing = false;
-      svc._lastPaint = null;
-      Sfx.sauceStop();
-      if (pz) this._computeCoverage(pz);
+    if (svc._pouring) {
+      svc._pouring = false;
+      if (svc.stage === 'sauce') Sfx.sauceStop();
     }
-    if (svc._cheesing) svc._cheesing = false;
 
     if (svc.held && pz) {
       const h = svc.held;
       svc.held = null;
-      this._placePiece(svc, h.type, x, y);
+      // a piece that misses the pizza goes back in its bin
+      if (!this._placePiece(svc, h.type, x, y)) svc.state.stock[h.type]++;
       if (h.n === 2) {
         // second piece lands beside the first on a free grid point
         const spot = this._freeGhost(svc, x, y, true);
         if (spot) this._placePiece(svc, h.type, pz.x + spot.x, pz.y + spot.y, 0.08);
+        else svc.state.stock[h.type]++;
       }
     } else if (svc.held) {
+      svc.state.stock[svc.held.type] += svc.held.n;
       svc.held = null;
     }
 
@@ -364,10 +395,10 @@ export const Build = {
         const k = maxR / d;
         lx *= k; ly *= k;
       } else {
-        // dropped on the counter — lost
+        // missed the pizza — back to the bin (caller refunds stock)
         Juice.flourPuff(x, y + 6, 5);
         Sfx.pat();
-        return;
+        return false;
       }
     }
 
@@ -380,6 +411,24 @@ export const Build = {
         Juice.tween({ target: piece, from: { sy: 0.72 }, to: { sy: 1 }, dur: 0.25, ease: Ease.outElastic });
       },
     });
+    return true;
+  },
+
+  // amber heads-up the moment a bin dips low, red shout when it empties
+  _stockWarning(svc, type) {
+    const stock = svc.state.stock[type] | 0;
+    const bin = this.bins(svc).find(b => b.type === type);
+    if (!bin) return;
+    const label = BAL.TOPPINGS[type].label;
+    if (stock === 0 && !svc.outWarned[type]) {
+      svc.outWarned[type] = true;
+      Juice.floatText(bin.x + bin.w / 2, bin.y - 30, `${label} EMPTY!`, { color: '#ff6b52', size: 19 });
+      Sfx.warn();
+    } else if (stock > 0 && stock <= BAL.STOCK.LOW_AT && !svc.lowWarned[type]) {
+      svc.lowWarned[type] = true;
+      Juice.floatText(bin.x + bin.w / 2, bin.y - 30, `Low on ${label}!`, { color: '#f5b942', size: 17 });
+      Sfx.warn();
+    }
   },
 
   _needed(svc, type) {
@@ -422,10 +471,7 @@ export const Build = {
   // ---- stage evaluation (per-station feedback pops) -------------------------
   evalStage(svc) {
     const pz = svc.pizza, t = svc.ticket;
-    if (svc.stage === 'sauce') {
-      this._computeCoverage(pz);
-      return Score.amountGrade(pz.sauceCoverage, t.sauce);
-    }
+    if (svc.stage === 'sauce') return Score.amountGrade(pz.sauceCoverage, t.sauce);
     if (svc.stage === 'cheese') return Score.amountGrade(Score.cheesePct(pz), t.cheese);
     if (svc.stage === 'toppings') return Score.toppingsResult(pz, t).grade;
     return 'good';
@@ -473,9 +519,9 @@ export const Build = {
       this.drawPizza(ctx, pz);
     }
 
-    // coverage hint ring (ladle max tier, during sauce)
-    if (pz && svc.stage === 'sauce' && svc.state.upgrades.ladle >= 3) {
-      this._renderCoverageRing(svc, ctx, pz);
+    // band gauge: how full vs the ticket's band (sauce & cheese stages)
+    if (pz && (svc.stage === 'sauce' || svc.stage === 'cheese') && svc.ticket) {
+      this._renderGauge(svc, ctx, pz);
     }
 
     // ghost grid hint while holding a piece (tongs t2+)
@@ -604,26 +650,74 @@ export const Build = {
     ctx.restore();
   },
 
-  _renderCoverageRing(svc, ctx, pz) {
-    const t = svc.ticket;
-    const [lo, hi] = BAL.SCORE.BANDS[t.sauce];
-    const R = pz.R + 16;
+  // Vertical fill gauge left of the pizza: band segments, ticket band in
+  // pulsing gold, needle at the current amount. Same language as the oven meter.
+  _renderGauge(svc, ctx, pz) {
+    const bandName = svc.stage === 'sauce' ? svc.ticket.sauce : svc.ticket.cheese;
+    const pct = this.pourPct(svc);
+    const MAX = 115;                        // gauge top (heavy band ends 112)
+    const W = 18, H = 170;
+    const gx = pz.x - pz.R - 52, gy = pz.y - H / 2;
+    const yFor = p => gy + H - (clamp(p, 0, MAX) / MAX) * H;
+
     ctx.save();
-    ctx.lineWidth = 7;
-    // track
-    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
-    ctx.beginPath(); ctx.arc(pz.x, pz.y, R, -Math.PI / 2, Math.PI * 1.5); ctx.stroke();
-    // target band
-    ctx.strokeStyle = 'rgba(123,191,94,0.8)';
-    ctx.beginPath();
-    ctx.arc(pz.x, pz.y, R, -Math.PI / 2 + (lo / 100) * Math.PI * 2, -Math.PI / 2 + (Math.min(hi, 100) / 100) * Math.PI * 2);
-    ctx.stroke();
-    // current coverage
+    // frame + track
+    rr(ctx, gx - 4, gy - 4, W + 8, H + 8, 8);
+    ctx.fillStyle = '#4a2e1d'; ctx.fill();
+    ctx.fillStyle = '#2e1d12';
+    ctx.fillRect(gx, gy, W, H);
+
+    // band segments
+    const COLS = { light: '#fde9c8', normal: '#f7c173', heavy: '#ef9b4e' };
+    for (const [name, [lo, hi]] of Object.entries(BAL.SCORE.BANDS)) {
+      ctx.fillStyle = COLS[name];
+      ctx.fillRect(gx, yFor(hi), W, yFor(lo) - yFor(hi));
+    }
+
+    // ticket band: pulsing gold outline (+ green glow when the needle is inside)
+    const [lo, hi] = BAL.SCORE.BANDS[bandName];
+    const inBand = pct >= lo && pct <= hi;
+    ctx.save();
+    ctx.globalAlpha = 0.75 + 0.25 * Math.sin(svc.elapsed * 6);
     ctx.lineWidth = 4;
-    ctx.strokeStyle = '#ffd54a';
-    ctx.beginPath();
-    ctx.arc(pz.x, pz.y, R, -Math.PI / 2, -Math.PI / 2 + (clamp(pz.sauceCoverage, 0, 100) / 100) * Math.PI * 2);
+    ctx.strokeStyle = inBand ? '#9fe07c' : '#ffd54a';
+    rr(ctx, gx - 2, yFor(hi) - 2, W + 4, yFor(lo) - yFor(hi) + 4, 5);
     ctx.stroke();
+    ctx.restore();
+
+    // current fill line up the side
+    ctx.fillStyle = inBand ? '#9fe07c' : '#fffbef';
+    ctx.fillRect(gx + W + 5, yFor(pct), 3, gy + H - yFor(pct));
+
+    // needle
+    const ny = yFor(pct);
+    ctx.fillStyle = '#fffbef';
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(gx - 6, ny);
+    ctx.lineTo(gx - 16, ny - 7);
+    ctx.lineTo(gx - 16, ny + 7);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.fillRect(gx - 2, ny - 1.5, W + 4, 3);
+
+    // band initials
+    ctx.fillStyle = '#4a2e1d';
+    ctx.font = '900 10px Trebuchet MS, system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const [name, [blo, bhi]] of Object.entries(BAL.SCORE.BANDS)) {
+      ctx.fillText(name[0].toUpperCase(), gx + W / 2, (yFor(blo) + yFor(bhi)) / 2);
+    }
+
+    // header
+    ctx.fillStyle = '#fff6e0';
+    ctx.font = '900 11px Trebuchet MS, system-ui, sans-serif';
+    ctx.fillText(svc.stage === 'sauce' ? 'SAUCE' : 'CHEESE', gx + W / 2, gy - 16);
+    if (inBand) {
+      ctx.fillStyle = '#9fe07c';
+      ctx.fillText('IN BAND!', gx + W / 2, gy + H + 16);
+    }
     ctx.restore();
   },
 
@@ -631,28 +725,66 @@ export const Build = {
     const active = svc.stage === 'toppings';
     const pz = svc.pizza;
     for (const b of this.bins(svc)) {
+      const stock = svc.state.stock[b.type] | 0;
+      const low = stock > 0 && stock <= BAL.STOCK.LOW_AT;
+      const out = stock === 0;
       const hov = active && svc._binHover === b.type;
       const lift = hov ? -6 : 0;
+      // empty-bin wobble feedback
+      const shake = svc._binShake && svc._binShake.type === b.type
+        ? Math.sin(svc._binShake.t * 50) * 5 * (svc._binShake.t / 0.4) : 0;
       ctx.save();
+      ctx.translate(shake, 0);
       ctx.globalAlpha = active ? 1 : 0.55;
       // bin body
       rr(ctx, b.x, b.y + lift, b.w, b.h, 12);
       ctx.fillStyle = hov ? '#aab4bd' : '#98a2ab';
       ctx.fill();
       ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE; ctx.stroke();
+      // low/out alert glow — visible at every stage so run-outs never surprise
+      if (low || out) {
+        ctx.save();
+        ctx.globalAlpha = 0.45 + 0.3 * Math.sin(svc.elapsed * (out ? 8 : 5));
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = out ? '#e25540' : '#f5b942';
+        rr(ctx, b.x - 4, b.y - 4 + lift, b.w + 8, b.h + 8, 14);
+        ctx.stroke();
+        ctx.restore();
+      }
       rr(ctx, b.x + 6, b.y + 6 + lift, b.w - 12, b.h - 30, 8);
       ctx.fillStyle = '#6e7880'; ctx.fill();
 
-      // heap of pieces
+      // heap of pieces — thins out as stock runs down
+      const heapN = Math.min(5, Math.ceil(stock / 5));
       ctx.save();
       rr(ctx, b.x + 6, b.y + 6 + lift, b.w - 12, b.h - 30, 8);
       ctx.clip();
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < heapN; i++) {
         const px = b.x + 20 + ((i * 41) % (b.w - 40));
         const py = b.y + 22 + lift + ((i * 29) % (b.h - 52));
         drawToppingShape(ctx, b.type, px, py, (i * 1.3) % 6.2, 0.95, 0);
       }
       ctx.restore();
+      if (out) {
+        ctx.save();
+        ctx.translate(b.x + b.w / 2, b.y + (b.h - 24) / 2 + lift);
+        ctx.rotate(-0.12);
+        ctx.fillStyle = '#e25540';
+        ctx.font = '900 17px Trebuchet MS, system-ui, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('OUT', 0, 0);
+        ctx.restore();
+      }
+
+      // stock chip (top-left)
+      rr(ctx, b.x + 4, b.y + 4 + lift, 40, 19, 9);
+      ctx.fillStyle = out ? '#e25540' : low ? '#f5b942' : '#fffbef';
+      ctx.fill();
+      ctx.lineWidth = 2.5; ctx.strokeStyle = OUTLINE; ctx.stroke();
+      ctx.fillStyle = out ? '#fff' : '#4a2e1d';
+      ctx.font = '900 12px Trebuchet MS, system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(`×${stock}`, b.x + 24, b.y + 14 + lift);
 
       // label + needed count chip
       ctx.fillStyle = '#fffbef';
@@ -704,10 +836,25 @@ export const Build = {
     const p = svc.game.pointer;
 
     if (svc.stage === 'sauce') {
-      // ladle follows the cursor
+      const pz = svc.pizza;
+      // pour stream: sauce drops fall from the ladle toward the pizza centre
+      if (svc._pouring && pz) {
+        ctx.save();
+        const tip = svc._pouring ? 0.35 : 0;   // ladle tilts while pouring
+        for (let i = 0; i < 3; i++) {
+          const k = ((svc.elapsed * 2.4) + i / 3) % 1;
+          const dx = lerp(p.x + 10, pz.x, k);
+          const dy = lerp(p.y + 16, pz.y, k);
+          ctx.globalAlpha = 0.9 - k * 0.3;
+          ctx.fillStyle = '#c23a1c';
+          ctx.beginPath(); ctx.arc(dx, dy, 5.5 - k * 2.5, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.restore();
+      }
+      // ladle follows the cursor, tips while pouring
       ctx.save();
       ctx.translate(p.x, p.y);
-      ctx.rotate(-0.5);
+      ctx.rotate(-0.5 + (svc._pouring ? 0.45 : 0));
       ctx.fillStyle = '#8d8d96';
       rr(ctx, -4, -58, 8, 52, 4); ctx.fill();
       ctx.lineWidth = 3; ctx.strokeStyle = OUTLINE; ctx.stroke();
@@ -717,8 +864,25 @@ export const Build = {
       ctx.fillStyle = '#c23a1c'; ctx.fill();
       ctx.restore();
     } else if (svc.stage === 'cheese') {
+      const pz = svc.pizza;
+      // falling fleck stream while shaking
+      if (svc._pouring && pz) {
+        ctx.save();
+        ctx.fillStyle = '#f7d774';
+        for (let i = 0; i < 4; i++) {
+          const k = ((svc.elapsed * 3) + i / 4) % 1;
+          const dx = lerp(p.x + rand(-8, 8), pz.x + rand(-20, 20), k);
+          const dy = lerp(p.y - 6, pz.y, k);
+          ctx.save();
+          ctx.translate(dx, dy); ctx.rotate(k * 5 + i);
+          ctx.globalAlpha = 0.9 - k * 0.4;
+          ctx.fillRect(-4, -1.5, 8, 3);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
       // shaker follows the cursor, rattles while dispensing
-      const wob = svc._cheesing ? Math.sin(svc.elapsed * 40) * 0.12 : 0;
+      const wob = svc._pouring ? Math.sin(svc.elapsed * 40) * 0.12 : 0;
       ctx.save();
       ctx.translate(p.x, p.y - 14);
       ctx.rotate(Math.PI + wob); // upside down, shaking holes downward
