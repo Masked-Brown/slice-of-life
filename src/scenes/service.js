@@ -23,8 +23,8 @@ const RAIL_LABEL = { dough: 'DOUGH', sauce: 'SAUCE', cheese: 'CHEESE', toppings:
 
 const TUTORIAL = {
   dough: { text: 'Read the ticket, then click the matching dough ball.', x: 410, y: 320, dir: 'up' },
-  sauce: { text: 'Hold & drag over the dough to ladle sauce — match the ticket’s amount, then press NEXT.', x: 480, y: 540, dir: 'up' },
-  cheese: { text: 'Hold & drag to sprinkle cheese. Same bands: light / normal / heavy.', x: 480, y: 540, dir: 'up' },
+  sauce: { text: 'Press & HOLD over the pizza to pour sauce. Release inside the gold band on the gauge, then press NEXT.', x: 480, y: 540, dir: 'up' },
+  cheese: { text: 'Same again: HOLD to sprinkle cheese, release in the gold band.', x: 480, y: 540, dir: 'up' },
   toppings: { text: 'Drag toppings from the bins. Counts matter! Drag a piece off the pizza to remove it.', x: 560, y: 500, dir: 'down' },
   oven: { text: 'Slide the pizza into the oven, pull it out in the right zone — then ring the bell!', x: 760, y: 560, dir: 'up' },
 };
@@ -115,6 +115,9 @@ export const ServiceScene = {
     const grade = Build.evalStage(svc);
     const pz = svc.pizza;
     this._gradePop(grade, PIZZA_POS.x, PIZZA_POS.y - (pz ? pz.R : 100) - 24);
+    svc._pouring = false;
+    svc._wasInBand = false;        // fresh band tick for the next pour stage
+    Sfx.sauceStop();
     if (svc.stage === 'sauce') { svc.stage = 'cheese'; this._setTutorial('cheese'); }
     else if (svc.stage === 'cheese') { svc.stage = 'toppings'; this._setTutorial('toppings'); }
     else if (svc.stage === 'toppings') { svc.stage = 'tooven'; this._setTutorial('oven'); }
