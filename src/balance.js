@@ -12,14 +12,14 @@ export const BAL = {
   // ---- Economy --------------------------------------------------------
   ECONOMY: {
     START_MONEY: 0,
-    BASE_PRICE: { S: 5, M: 8, L: 12 },        // £ by pizza size
-    PRICE_PER_TOPPING_TYPE: 1.5,              // £ per topping TYPE on the order
+    BASE_PRICE: { S: 6, M: 9, L: 14 },        // £ by pizza size
+    PRICE_PER_TOPPING_TYPE: 2.0,              // £ per topping TYPE on the order
     SAT_MULT_MIN: 0.4,                        // order value × this at 0 satisfaction
-    SAT_MULT_MAX: 1.1,                        // ...× this at 100 satisfaction
+    SAT_MULT_MAX: 1.15,                       // ...× this at 100 satisfaction
     TIP_START_SAT: 55,                        // no tip below this satisfaction
     TIP_KNEE_SAT: 85,                         // tip curve steepens above this
     TIP_KNEE_FRAC: 0.08,                      // tip fraction AT the knee
-    TIP_MAX_FRAC: 0.30,                       // tip fraction at 100 satisfaction
+    TIP_MAX_FRAC: 0.35,                       // tip fraction at 100 satisfaction
     RATING_PRICE_MULT: 0.08,                  // price ×(1 + (rating-3) × this)
   },
 
@@ -29,7 +29,7 @@ export const BAL = {
     CUSTOMERS_PER_DAY: 1,                     // +N customers per day number
     RATING_BONUS_MULT: 2,                     // + round((rating-3) × this)
     MIN_CUSTOMERS: 3,
-    MAX_CUSTOMERS: 14,                        // V1 cap
+    MAX_CUSTOMERS: 14,                        // V2 cap
     GAP_BASE_MIN: 15,                         // arrival gap range (s), day 1
     GAP_BASE_MAX: 26,
     GAP_DAY_DECAY: 0.93,                      // gap range × this per day
@@ -51,18 +51,18 @@ export const BAL = {
   SCORE: {
     WEIGHTS: { size: 15, sauce: 20, cheese: 15, toppings: 30, bake: 20 },
     // sauce/cheese amount bands as % (coverage % / cheese-fullness %)
-    BANDS: { light: [25, 45], normal: [50, 75], heavy: [80, 110] },
-    BAND_FALLOFF: 25,            // % outside a band where score reaches 0
-    PERFECT_MARGIN: 0.2,         // inner (1-2×this) of band counts as "Perfect!"
-    SPLAT_PENALTY: 1.5,          // sauce pts lost per counter splat...
-    SPLAT_PENALTY_MAX: 6,        // ...capped here
-    TOPPING_COUNT_PENALTY: 0.3,  // fraction of a type's pts lost per piece off
-    TOPPING_SPREAD_WEIGHT: 0.25, // fraction of topping pts that come from spread
-    EXTRA_TYPE_PENALTY: 8,       // flat pts lost per topping type NOT on the ticket
-    BAKE_ADJACENT_CREDIT: 0.4,   // fraction of bake pts for one zone off
+    BANDS: { light: [22, 46], normal: [50, 76], heavy: [80, 112] },
+    BAND_FALLOFF: 30,            // % outside a band where score reaches 0
+    PERFECT_MARGIN: 0.15,        // inner (1-2×this) of band counts as "Perfect!"
+    SPLAT_PENALTY: 1.2,          // sauce pts lost per counter splat...
+    SPLAT_PENALTY_MAX: 5,        // ...capped here
+    TOPPING_COUNT_PENALTY: 0.22, // fraction of a type's pts lost per piece off
+    TOPPING_SPREAD_WEIGHT: 0.18, // fraction of topping pts that come from spread
+    EXTRA_TYPE_PENALTY: 6,       // flat pts lost per topping type NOT on the ticket
+    BAKE_ADJACENT_CREDIT: 0.5,   // fraction of bake pts for one zone off
     BURNT_TOTAL_MULT: 0.6,       // total accuracy × this when burnt (heavy penalty)
-    SPEED_FLOOR: 0.6,            // satisfaction × this at ≥2× par time
-    PAR_BASE: 20,                // (s) par time base
+    SPEED_FLOOR: 0.7,            // satisfaction × this at ≥2× par time
+    PAR_BASE: 24,                // (s) par time base
     PAR_PER_TYPE: 6,             // (s) + per topping type
     PAR_FAIL_X: 2,               // speed bottoms out at par × this
     STAR_THRESHOLDS: [[95, 5], [80, 4], [60, 3], [40, 2], [0, 1]], // [minSat, stars]
@@ -71,8 +71,8 @@ export const BAL = {
 
   // ---- Patience ------------------------------------------------------------
   PATIENCE: {
-    FRONT_SECONDS: 75,           // full drain time at the front of the queue
-    QUEUE_SECONDS: 110,          // full drain time while waiting behind
+    FRONT_SECONDS: 90,           // full drain time at the front of the queue
+    QUEUE_SECONDS: 140,          // full drain time while waiting behind
     DECOR_BONUS: 0.15,           // +15% patience per decor tier
     WARN_FRAC: 0.45,             // below: checking-watch face
     ANGRY_FRAC: 0.2,             // below: steaming face
@@ -87,52 +87,142 @@ export const BAL = {
     RADIUS: { S: 86, M: 106, L: 128 },        // px on the counter
     SIZE_FACTOR: { S: 0.72, M: 1, L: 1.4 },   // scales cheese "fullness"
     CHEESE_FULL: 110,                         // flecks = 100% on an M
-    SAUCE_BRUSH: [24, 29, 35, 42],            // ladle paint radius by tier
     SAUCE_RIM: 0.86,                          // sauceable radius as frac of pizza R
-    CHEESE_SPREAD: [26, 34, 43, 52],          // sprinkle radius by shaker tier
-    CHEESE_RATE: [55, 72, 92, 116],           // flecks/sec while held, by tier
     TOPPING_R: 15,                            // topping piece radius
     GRID_SNAP_DIST: 32,                       // tongs t2: ghost-grid snap radius
+  },
+
+  // ---- Hold-to-pour (sauce & cheese) --------------------------------------
+  POUR: {
+    SAUCE_RATE: [0.34, 0.40, 0.46, 0.52],     // coverage fraction/sec by ladle tier
+    CHEESE_RATE: [44, 52, 60, 70],            // flecks/sec by shaker tier
+    IN_BAND_SLOW: [0.8, 0.75, 0.62, 0.5],     // rate × this while inside the ticket band
+    OVERPOUR_SPLAT_CD: 0.5,                   // (s) between counter splats past full
   },
 
   // ---- Oven -------------------------------------------------------------
   OVEN: {
     BAKE_TIME: [13, 12.1, 11.2, 10.4],        // (s) raw→fully burnt, by oven tier
     // zone upper bounds as bake progress 0..1 (burnt ≥ well bound)
-    ZONES: { raw: 0.32, light: 0.5, normal: 0.68, well: 0.86 },
-    ZONE_WIDEN: 0.022,           // each zone grows this much per side per tier
+    ZONES: { raw: 0.30, light: 0.50, normal: 0.70, well: 0.88 },
+    ZONE_WIDEN: 0.025,           // each zone grows this much per side per tier
     URGENCY_FROM: 0.08,          // urgency ticks start this close to burnt
   },
 
   // ---- Upgrades (equipment tab) -----------------------------------------
-  // costs: tier1, tier2, tier3 (≈ ×2.2 per tier; tier1 ≈ one good day)
+  // costs: per tier (≈ ×2.2 per tier; tier1 ≈ one good day)
   UPGRADES: {
-    oven:   { name: 'Stone Oven',   costs: [50, 110, 245],
+    oven:   { name: 'Stone Oven',   costs: [60, 130, 280],
               tiers: ['Wider perfect zones', 'Even wider zones, hotter', 'Master oven — huge zones'] },
-    ladle:  { name: 'Sauce Ladle',  costs: [40, 90, 200],
-              tiers: ['Bigger sauce trail', 'Even bigger trail', 'Pro ladle + coverage ring'] },
-    shaker: { name: 'Cheese Shaker', costs: [40, 90, 200],
-              tiers: ['Wider sprinkle', 'Faster dispense', 'Blizzard mode'] },
-    tongs:  { name: 'Topping Tongs', costs: [55, 120, 265],
+    ladle:  { name: 'Sauce Ladle',  costs: [45, 100, 220],
+              tiers: ['Faster pour', 'Steadier pour near the band', 'Pro ladle — pinpoint control'] },
+    shaker: { name: 'Cheese Shaker', costs: [45, 100, 220],
+              tiers: ['Faster sprinkle', 'Steadier hand near the band', 'Blizzard mode — fast & precise'] },
+    tongs:  { name: 'Topping Tongs', costs: [60, 135, 290],
               tiers: ['Edge-save grip', 'Neat-grid snapping', 'Double-grab'] },
-    decor:  { name: 'Counter & Decor', costs: [60, 130, 290],
+    decor:  { name: 'Counter & Decor', costs: [70, 150, 320],
               tiers: ['Fresh paint, +1 queue slot, patience +15%',
                       'Plants & art, +1 slot, patience +15%',
                       'Full refit, +1 slot, patience +15%'] },
+    supply: { name: 'Supply Deals', costs: [45, 100, 220, 480],
+              tiers: ['Bulk paper: restock −10%', 'Local farm deal: restock −20%',
+                      'Wholesale account: restock −35%', 'Importer contract: restock −50%'] },
   },
+  SUPPLY_DISCOUNTS: [0, 0.10, 0.20, 0.35, 0.50],  // restock discount by supply tier
 
   // ---- Toppings (menu tab) — display order matters -----------------------
+  // cost = unlock price · unit = restock £/piece (before supply discount)
   TOPPINGS: {
-    pepperoni: { label: 'Pepperoni', cost: 0,   dot: '#d8442e' },
-    mushroom:  { label: 'Mushroom',  cost: 0,   dot: '#e8d9bd' },
-    onion:     { label: 'Onion',     cost: 35,  dot: '#c39bd3' },
-    olive:     { label: 'Olive',     cost: 50,  dot: '#3d4a26' },
-    pepper:    { label: 'Pepper',    cost: 70,  dot: '#4caf50' },
-    ham:       { label: 'Ham',       cost: 90,  dot: '#f48fb1' },
-    pineapple: { label: 'Pineapple', cost: 115, dot: '#f6c945' },
-    chilli:    { label: 'Chilli',    cost: 150, dot: '#e53935' },
+    pepperoni: { label: 'Pepperoni', cost: 0,   unit: 0.10, dot: '#d8442e' },
+    mushroom:  { label: 'Mushroom',  cost: 0,   unit: 0.09, dot: '#e8d9bd' },
+    onion:     { label: 'Onion',     cost: 35,  unit: 0.08, dot: '#c39bd3' },
+    olive:     { label: 'Olive',     cost: 50,  unit: 0.12, dot: '#3d4a26' },
+    pepper:    { label: 'Pepper',    cost: 70,  unit: 0.12, dot: '#4caf50' },
+    ham:       { label: 'Ham',       cost: 90,  unit: 0.16, dot: '#f48fb1' },
+    pineapple: { label: 'Pineapple', cost: 115, unit: 0.18, dot: '#f6c945' },
+    chilli:    { label: 'Chilli',    cost: 150, unit: 0.20, dot: '#e53935' },
   },
   SIZE_L_COST: 120,
+
+  // ---- Stock / restock -----------------------------------------------------
+  STOCK: {
+    START: 24,                   // starting stock per starter topping
+    NEW_TOPPING_INCLUDED: 15,    // stock included when a topping is unlocked
+    LOW_AT: 6,                   // low-stock warning threshold (amber)
+    BUY_AMOUNTS: [5, 20],        // restock button quantities
+  },
+
+  // ---- Daily specials --------------------------------------------------------
+  SPECIALS: {
+    WEIGHT: 2.6,                 // special toppings this × more likely on tickets
+    PRICE_PREMIUM: 0.12,         // orders featuring a special pay +12%
+    TWO_FROM_DAY: 5,             // two specials per day from this day on
+  },
+
+  // ---- Regulars ---------------------------------------------------------------
+  REGULARS: {
+    CHANCE: 0.12,                // base chance a customer slot becomes a regular
+    RATING_CHANCE_BONUS: 0.06,   // + per star above 3
+    MAX_CHANCE: 0.3,
+    SAT_THRESHOLD: 85,           // satisfaction needed for the regular bonus
+    TIP_BONUS_FRAC: 0.25,        // bonus tip as a fraction of order price
+    // fixed look + signature order; they appear once their toppings (and size)
+    // are unlocked, at most once per day each
+    LIST: {
+      marco: { name: 'Marco',    skin: '#e0a878', shirt: '#e2725b', hair: '#222',     hat: true,
+               fav: { size: 'M', sauce: 'heavy',  cheese: 'normal', bake: 'well',
+                      toppings: [{ type: 'pepperoni', count: 6 }] } },
+      rosa:  { name: 'Rosa',     skin: '#f2c89c', shirt: '#d678c0', hair: '#6d4c2f',  hat: false,
+               fav: { size: 'S', sauce: 'light',  cheese: 'heavy',  bake: 'light',
+                      toppings: [{ type: 'mushroom', count: 4 }] } },
+      stan:  { name: 'Stan',     skin: '#f7d9b4', shirt: '#5da9d6', hair: '#888',     hat: false,
+               fav: { size: 'M', sauce: 'normal', cheese: 'light',  bake: 'normal',
+                      toppings: [{ type: 'onion', count: 5 }, { type: 'olive', count: 4 }] } },
+      priya: { name: 'Priya',    skin: '#c98c5e', shirt: '#9575cd', hair: '#3a2a1c',  hat: false,
+               fav: { size: 'M', sauce: 'normal', cheese: 'normal', bake: 'well',
+                      toppings: [{ type: 'pepper', count: 5 }, { type: 'mushroom', count: 4 }] } },
+      tony:  { name: 'Big Tony', skin: '#f2c89c', shirt: '#4db6ac', hair: '#3a2a1c',  hat: true,
+               fav: { size: 'L', sauce: 'heavy',  cheese: 'heavy',  bake: 'normal',
+                      toppings: [{ type: 'pepperoni', count: 7 }, { type: 'ham', count: 6 }] } },
+      nina:  { name: 'Nina',     skin: '#8d5a3b', shirt: '#f5b942', hair: '#d9534f',  hat: false,
+               fav: { size: 'M', sauce: 'normal', cheese: 'normal', bake: 'light',
+                      toppings: [{ type: 'pineapple', count: 5 }, { type: 'chilli', count: 4 }] } },
+    },
+  },
+
+  // ---- Lifetime milestones (one-off cash bonuses) ---------------------------
+  // stat: see goals.js metrics(). ratingBump: × five-star ratings pushed on hit.
+  MILESTONES: [
+    { id: 'serve25',     label: 'Serve 25 pizzas',            stat: 'served',        target: 25,   reward: 30 },
+    { id: 'serve100',    label: 'Serve 100 pizzas',           stat: 'served',        target: 100,  reward: 90 },
+    { id: 'serve250',    label: 'Serve 250 pizzas',           stat: 'served',        target: 250,  reward: 200 },
+    { id: 'serve500',    label: 'Serve 500 pizzas',           stat: 'served',        target: 500,  reward: 400 },
+    { id: 'earn250',     label: '£250 lifetime takings',      stat: 'earned',        target: 250,  reward: 25 },
+    { id: 'earn1000',    label: '£1,000 lifetime takings',    stat: 'earned',        target: 1000, reward: 70 },
+    { id: 'earn5000',    label: '£5,000 lifetime takings',    stat: 'earned',        target: 5000, reward: 250 },
+    { id: 'stars3',      label: 'Hold a 3★ rating',           stat: 'rating',        target: 3,    reward: 15 },
+    { id: 'stars4',      label: 'Reach a 4★ rating',          stat: 'rating',        target: 4,    reward: 50 },
+    { id: 'stars5',      label: 'Reach a 5★ rating',          stat: 'rating',        target: 5,    reward: 150 },
+    { id: 'perfect10',   label: '10 perfect pizzas',          stat: 'perfects',      target: 10,   reward: 40,  ratingBump: 1 },
+    { id: 'perfect50',   label: '50 perfect pizzas',          stat: 'perfects',      target: 50,   reward: 150, ratingBump: 1 },
+    { id: 'streak5',     label: '5 perfect pizzas in a row',  stat: 'bestStreak',    target: 5,    reward: 60,  ratingBump: 1 },
+    { id: 'upgrades5',   label: 'Own 5 upgrade tiers',        stat: 'upgradesOwned', target: 5,    reward: 50 },
+    { id: 'allToppings', label: 'Unlock every topping',       stat: 'toppingsOwned', target: 8,    reward: 120 },
+    { id: 'profit100',   label: 'A £100-profit day',          stat: 'bestDayProfit', target: 100,  reward: 60 },
+  ],
+  MILESTONE_MIN_RATINGS: 8,      // star milestones need this many rated customers
+
+  // ---- Daily goals (one rotating goal per day) ---------------------------------
+  // needs: 'sizeL' | 'manyToppings' gate availability
+  DAILY_GOALS: [
+    { id: 'noStorms', desc: 'No walk-outs all day',                       short: 'No walk-outs',     reward: 14 },
+    { id: 'sat90',    desc: 'Finish the day at 90%+ avg satisfaction',    short: '90% satisfaction', reward: 16 },
+    { id: 'sellL',    desc: 'Sell 3 large pizzas',                        short: '3 large pizzas',   reward: 15, target: 3, needs: 'sizeL' },
+    { id: 'perfect2', desc: 'Serve 2 perfect pizzas',                     short: '2 perfects',       reward: 18, target: 2 },
+    { id: 'useAll',   desc: 'Use every topping at least once',            short: 'Use every topping', reward: 15, needs: 'manyToppings' },
+    { id: 'fast5',    desc: 'Serve 5 orders under par time',              short: '5 fast orders',    reward: 15, target: 5 },
+  ],
+  DAILY_GOAL_MANY_TOPPINGS: 4,   // 'useAll' offered once you own this many
 
   // ---- Boosts (one-day consumables) ---------------------------------------
   BOOSTS: {
