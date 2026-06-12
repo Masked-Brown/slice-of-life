@@ -56,6 +56,7 @@ export const Build = {
     svc._wasInBand = false;      // for the band-entry tick
     svc._splatCD = 0;
     svc._cheeseAcc = 0;
+    svc._binShake = null;        // { type, t } — empty-bin feedback wobble
   },
 
   makePizza(size) {
@@ -118,6 +119,7 @@ export const Build = {
     const pz = svc.pizza;
 
     if (svc._splatCD > 0) svc._splatCD -= dt;
+    if (svc._binShake && (svc._binShake.t -= dt) <= 0) svc._binShake = null;
 
     // hold-to-pour: coverage grows from the centre while held
     if (svc.stage === 'sauce' && svc._pouring && pz) this._updateSaucePour(svc, dt);
@@ -283,15 +285,26 @@ export const Build = {
           }
         }
       }
-      // grab from a bin
+      // grab from a bin (stock permitting)
       const bin = this._binAt(svc, x, y);
       if (bin) {
+        const stock = svc.state.stock[bin.type] | 0;
+        if (stock <= 0) {
+          // empty bin — the order has to go out without it
+          svc._binShake = { type: bin.type, t: 0.4 };
+          Juice.floatText(bin.x + bin.w / 2, bin.y - 30,
+            `Out of ${BAL.TOPPINGS[bin.type].label}!`, { color: '#ff8a70', size: 17 });
+          Sfx.popOff();
+          return;
+        }
         let n = 1;
-        if (svc.state.upgrades.tongs >= 3) {
+        if (svc.state.upgrades.tongs >= 3 && stock >= 2) {
           const w = this._needed(svc, bin.type);
           const placed = pz ? pz.toppings.filter(t => t.type === bin.type).length : 0;
           if (w != null && w - placed >= 2) n = 2; // double-grab when ≥2 still needed
         }
+        svc.state.stock[bin.type] -= n;
+        this._stockWarning(svc, bin.type);
         svc.held = { type: bin.type, x, y, n };
         Sfx.pluck();
       }
@@ -343,13 +356,16 @@ export const Build = {
     if (svc.held && pz) {
       const h = svc.held;
       svc.held = null;
-      this._placePiece(svc, h.type, x, y);
+      // a piece that misses the pizza goes back in its bin
+      if (!this._placePiece(svc, h.type, x, y)) svc.state.stock[h.type]++;
       if (h.n === 2) {
         // second piece lands beside the first on a free grid point
         const spot = this._freeGhost(svc, x, y, true);
         if (spot) this._placePiece(svc, h.type, pz.x + spot.x, pz.y + spot.y, 0.08);
+        else svc.state.stock[h.type]++;
       }
     } else if (svc.held) {
+      svc.state.stock[svc.held.type] += svc.held.n;
       svc.held = null;
     }
 
@@ -379,10 +395,10 @@ export const Build = {
         const k = maxR / d;
         lx *= k; ly *= k;
       } else {
-        // dropped on the counter — lost
+        // missed the pizza — back to the bin (caller refunds stock)
         Juice.flourPuff(x, y + 6, 5);
         Sfx.pat();
-        return;
+        return false;
       }
     }
 
@@ -395,6 +411,24 @@ export const Build = {
         Juice.tween({ target: piece, from: { sy: 0.72 }, to: { sy: 1 }, dur: 0.25, ease: Ease.outElastic });
       },
     });
+    return true;
+  },
+
+  // amber heads-up the moment a bin dips low, red shout when it empties
+  _stockWarning(svc, type) {
+    const stock = svc.state.stock[type] | 0;
+    const bin = this.bins(svc).find(b => b.type === type);
+    if (!bin) return;
+    const label = BAL.TOPPINGS[type].label;
+    if (stock === 0 && !svc.outWarned[type]) {
+      svc.outWarned[type] = true;
+      Juice.floatText(bin.x + bin.w / 2, bin.y - 30, `${label} EMPTY!`, { color: '#ff6b52', size: 19 });
+      Sfx.warn();
+    } else if (stock > 0 && stock <= BAL.STOCK.LOW_AT && !svc.lowWarned[type]) {
+      svc.lowWarned[type] = true;
+      Juice.floatText(bin.x + bin.w / 2, bin.y - 30, `Low on ${label}!`, { color: '#f5b942', size: 17 });
+      Sfx.warn();
+    }
   },
 
   _needed(svc, type) {
@@ -691,28 +725,66 @@ export const Build = {
     const active = svc.stage === 'toppings';
     const pz = svc.pizza;
     for (const b of this.bins(svc)) {
+      const stock = svc.state.stock[b.type] | 0;
+      const low = stock > 0 && stock <= BAL.STOCK.LOW_AT;
+      const out = stock === 0;
       const hov = active && svc._binHover === b.type;
       const lift = hov ? -6 : 0;
+      // empty-bin wobble feedback
+      const shake = svc._binShake && svc._binShake.type === b.type
+        ? Math.sin(svc._binShake.t * 50) * 5 * (svc._binShake.t / 0.4) : 0;
       ctx.save();
+      ctx.translate(shake, 0);
       ctx.globalAlpha = active ? 1 : 0.55;
       // bin body
       rr(ctx, b.x, b.y + lift, b.w, b.h, 12);
       ctx.fillStyle = hov ? '#aab4bd' : '#98a2ab';
       ctx.fill();
       ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE; ctx.stroke();
+      // low/out alert glow — visible at every stage so run-outs never surprise
+      if (low || out) {
+        ctx.save();
+        ctx.globalAlpha = 0.45 + 0.3 * Math.sin(svc.elapsed * (out ? 8 : 5));
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = out ? '#e25540' : '#f5b942';
+        rr(ctx, b.x - 4, b.y - 4 + lift, b.w + 8, b.h + 8, 14);
+        ctx.stroke();
+        ctx.restore();
+      }
       rr(ctx, b.x + 6, b.y + 6 + lift, b.w - 12, b.h - 30, 8);
       ctx.fillStyle = '#6e7880'; ctx.fill();
 
-      // heap of pieces
+      // heap of pieces — thins out as stock runs down
+      const heapN = Math.min(5, Math.ceil(stock / 5));
       ctx.save();
       rr(ctx, b.x + 6, b.y + 6 + lift, b.w - 12, b.h - 30, 8);
       ctx.clip();
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < heapN; i++) {
         const px = b.x + 20 + ((i * 41) % (b.w - 40));
         const py = b.y + 22 + lift + ((i * 29) % (b.h - 52));
         drawToppingShape(ctx, b.type, px, py, (i * 1.3) % 6.2, 0.95, 0);
       }
       ctx.restore();
+      if (out) {
+        ctx.save();
+        ctx.translate(b.x + b.w / 2, b.y + (b.h - 24) / 2 + lift);
+        ctx.rotate(-0.12);
+        ctx.fillStyle = '#e25540';
+        ctx.font = '900 17px Trebuchet MS, system-ui, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('OUT', 0, 0);
+        ctx.restore();
+      }
+
+      // stock chip (top-left)
+      rr(ctx, b.x + 4, b.y + 4 + lift, 40, 19, 9);
+      ctx.fillStyle = out ? '#e25540' : low ? '#f5b942' : '#fffbef';
+      ctx.fill();
+      ctx.lineWidth = 2.5; ctx.strokeStyle = OUTLINE; ctx.stroke();
+      ctx.fillStyle = out ? '#fff' : '#4a2e1d';
+      ctx.font = '900 12px Trebuchet MS, system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(`×${stock}`, b.x + 24, b.y + 14 + lift);
 
       // label + needed count chip
       ctx.fillStyle = '#fffbef';

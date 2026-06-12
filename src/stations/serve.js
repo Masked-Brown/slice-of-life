@@ -159,13 +159,22 @@ export const Serve = {
     Juice.tween({
       target: pz, to: { x: cust.x, y: cust.y + 26, scale: 0.45 },
       dur: 0.45, ease: (t) => t * t * (3 - 2 * t),
-      onDone: () => this._payout(svc, cust, res),
+      onDone: () => this._payout(svc, cust, res, pz),
     });
   },
 
-  _payout(svc, cust, res) {
+  _payout(svc, cust, res, pz) {
     const g = svc.game, state = svc.state;
+    const E = BAL.ECONOMY;
     svc.pizza = null;
+
+    // analytics: pieces consumed + revenue attributed per topping type
+    for (const t of pz.toppings) svc.usage[t.type] = (svc.usage[t.type] || 0) + 1;
+    const satMult = lerp(E.SAT_MULT_MIN, E.SAT_MULT_MAX, res.satisfaction / 100);
+    for (const w of cust.ticket.toppings) {
+      svc.toppingRevenue[w.type] = (svc.toppingRevenue[w.type] || 0)
+        + E.PRICE_PER_TOPPING_TYPE * priceMultiplier(state) * satMult;
+    }
 
     const total = res.pay + res.tip;
     state.money += total;

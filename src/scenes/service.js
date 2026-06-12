@@ -48,6 +48,8 @@ export const ServiceScene = {
       pending: Orders.generateDay(state),
       arrivalIn: BAL.DAYS.FIRST_ARRIVAL,
       served: 0, lost: 0, sales: 0, tipsTotal: 0, sats: [],
+      usage: {}, toppingRevenue: {},          // per-topping analytics for the day
+      lowWarned: {}, outWarned: {},           // one stock warning per topping per day
       prepLeft: state.boosts.prep ? BAL.BOOSTS.PREP_PIZZAS : 0,
       ratingAtStart: currentRating(state),
       orderIndex: 0,
@@ -162,8 +164,13 @@ export const ServiceScene = {
       Sfx.ovenStop();
       Juice.tween({ target: svc.oven, to: { door: 0 }, dur: 0.3 });
     }
+    // a held piece goes back in its bin; pieces on the binned pizza are spent
+    if (svc.held) {
+      svc.state.stock[svc.held.type] = (svc.state.stock[svc.held.type] | 0) + svc.held.n;
+    }
     const pz = svc.pizza;
     if (pz) {
+      for (const t of pz.toppings) svc.usage[t.type] = (svc.usage[t.type] || 0) + 1;
       Juice.killTweensOf(pz);
       pz.state = 'fly';
       Juice.tween({
