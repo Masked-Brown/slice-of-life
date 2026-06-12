@@ -47,7 +47,8 @@ export const ServiceScene = {
       splats: [], crumbs: [],
       splatCount: 0,
       customers: [],
-      pending: Orders.generateDay(state),
+      pending: [],                            // filled when the day actually starts
+      dayStarted: false,
       arrivalIn: BAL.DAYS.FIRST_ARRIVAL,
       served: 0, lost: 0, sales: 0, tipsTotal: 0, sats: [],
       usage: {}, toppingRevenue: {},          // per-topping analytics for the day
@@ -55,7 +56,7 @@ export const ServiceScene = {
       goal: { ...plan.goal, hit: false, failed: false },
       bonusEarned: 0,                         // goal + milestone cash won today
       largeSold: 0, perfectsToday: 0, underPar: 0, usedTypes: new Set(),
-      prepLeft: state.boosts.prep ? BAL.BOOSTS.PREP_PIZZAS : 0,
+      prepLeft: 0,
       ratingAtStart: currentRating(state),
       orderIndex: 0,
       shownMoney: state.money,
@@ -73,11 +74,8 @@ export const ServiceScene = {
       onOrderDone: res => this._onOrderDone(res),
       advanceStage: () => this._advanceStage(),
     };
-    svc.totalCustomers = svc.pending.length;
+    svc.totalCustomers = 0;
     g._svc = svc;   // debug/testing handle
-
-    // boosts are consumed at day start
-    state.boosts = { prep: 0, ad: 0 };
 
     Build.resetForOrder(svc);
     Oven.resetDay(svc);
@@ -85,9 +83,75 @@ export const ServiceScene = {
     g.dom.hud.classList.remove('hidden');
     g.dom.ticket.classList.add('hidden');
     this._updateHUD(true);
+    this._showDayBoard(g, plan);
+  },
 
+  // the moment the player hits START DAY: consume boosts, roll the queue
+  _startDay() {
+    const g = svc.game, state = svc.state;
+    svc.prepLeft = state.boosts.prep ? BAL.BOOSTS.PREP_PIZZAS : 0;
+    svc.pending = Orders.generateDay(state);
+    svc.totalCustomers = svc.pending.length;
+    state.boosts = { prep: 0, ad: 0 };
+    svc.dayStarted = true;
+    g.dom.dayboard.classList.add('hidden');
     Juice.stamp(640, 300, `DAY ${state.day} — OPEN!`, { color: '#9fe07c', size: 52 });
     Sfx.bell();
+  },
+
+  // ---- day-start board: specials, goal, stock check ----------------------
+  _showDayBoard(g, plan) {
+    const state = g.state;
+    const el = g.dom.dayboard;
+    const specialRows = plan.specials.map(t => `
+      <div class="db-row">
+        <span class="tk-dot" style="background:${BAL.TOPPINGS[t].dot}"></span>
+        <b>${BAL.TOPPINGS[t].label}</b>
+        <span class="db-note">in demand · +${Math.round(BAL.SPECIALS.PRICE_PREMIUM * 100)}% on those orders</span>
+      </div>`).join('');
+
+    const chips = state.toppings.map(t => {
+      const n = state.stock[t] | 0;
+      const cls = n === 0 ? 'db-chip-out' : n <= BAL.STOCK.LOW_AT ? 'db-chip-low' : '';
+      return `<span class="db-chip ${cls}">${BAL.TOPPINGS[t].label} ×${n}</span>`;
+    }).join('');
+    const flagged = state.toppings.filter(t => (state.stock[t] | 0) <= BAL.STOCK.LOW_AT);
+    const stockNote = flagged.length
+      ? `<div class="db-warn">⚠ Low on ${flagged.map(t => BAL.TOPPINGS[t].label).join(', ')} — restock in the shop!</div>`
+      : `<div class="db-ok">Stock looks good ✓</div>`;
+
+    el.innerHTML = `
+      <div class="dayboard">
+        <div class="db-head">— DAY ${state.day} —</div>
+        <div class="db-section">
+          <div class="db-label">TODAY'S SPECIAL${plan.specials.length > 1 ? 'S' : ''}</div>
+          ${specialRows}
+        </div>
+        <div class="db-section">
+          <div class="db-label">DAILY GOAL</div>
+          <div class="db-row"><b>🎯 ${plan.goal.desc}</b><span class="db-reward">+${gbp(plan.goal.reward)}</span></div>
+        </div>
+        <div class="db-section">
+          <div class="db-label">STOCK CHECK</div>
+          <div class="db-chips">${chips}</div>
+          ${stockNote}
+        </div>
+        <div class="db-buttons">
+          ${state.day > 1 ? '<button class="btn" id="db-shop">⬅ BACK TO SHOP</button>' : ''}
+          <button class="btn btn-big" id="db-start">START DAY ➜</button>
+        </div>
+      </div>`;
+    el.classList.remove('hidden');
+
+    el.querySelector('#db-start').addEventListener('click', () => {
+      Sfx.press();
+      this._startDay();
+    });
+    const shopBtn = el.querySelector('#db-shop');
+    if (shopBtn) shopBtn.addEventListener('click', () => {
+      Sfx.press();
+      g.setScene('shop');
+    });
   },
 
   exit(g) {
@@ -95,6 +159,8 @@ export const ServiceScene = {
     g.dom.hud.classList.add('hidden');
     g.dom.ticket.classList.add('hidden');
     g.dom.tutorial.classList.add('hidden');
+    g.dom.dayboard.classList.add('hidden');
+    g.dom.dayboard.innerHTML = '';
     Juice.clear();
     svc = null;
   },
@@ -275,6 +341,10 @@ export const ServiceScene = {
         satAvg: svc.sats.length ? svc.sats.reduce((a, b) => a + b, 0) / svc.sats.length : 0,
         ratingBefore: svc.ratingAtStart,
         ratingAfter: currentRating(svc.state),
+        used: svc.usage, toppingRevenue: svc.toppingRevenue,
+        bonus: svc.bonusEarned,
+        goalHit: !!svc.goal.hit,
+        goalDesc: svc.goal.desc, goalReward: svc.goal.reward,
       };
       Juice.tween({ dur: 1.1, onDone: () => g.setScene('dayEnd', stats) });
     }

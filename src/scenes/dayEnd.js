@@ -1,22 +1,51 @@
 // =====================================================================
 // dayEnd.js — the receipt tally. A reward moment: line items count up
 // with ticks, the total slams in with a cha-ching, stars pop one by one.
+// Also banks the day: writes state.lastDay (analytics), rolls the day
+// counter, and draws up tomorrow's specials + goal for the shop.
 // =====================================================================
 
 import { BAL } from '../balance.js';
 import { clamp, lerp, Juice, Ease } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { saveGame, gbp } from '../state.js';
+import { ensureNextDay, checkMilestones } from '../goals.js';
+import { analyticsHTML } from '../analytics.js';
 
 let ui = null;
 
 export const DayEndScene = {
 
   enter(g, stats) {
-    // end-of-day auto-save: the completed day is banked before the shop
-    g.state.day += 1;
-    g.state.phase = 'shop';
-    saveGame(g.state);
+    const state = g.state;
+
+    // ---- bank the day -------------------------------------------------
+    const restockSpend = state.carriedRestockSpend;
+    state.lastDay = {
+      day: stats.day, served: stats.served, lost: stats.lost,
+      sales: stats.sales, tips: stats.tips, bonus: stats.bonus,
+      restockSpend,
+      satAvg: stats.satAvg, rating: stats.ratingAfter,
+      used: stats.used, toppingRevenue: stats.toppingRevenue,
+      goalHit: stats.goalHit, goalDesc: stats.goalDesc, goalReward: stats.goalReward,
+    };
+    state.carriedRestockSpend = 0;
+    const dayProfit = stats.sales + stats.tips + stats.bonus - restockSpend;
+    state.stats.bestDayProfit = Math.max(state.stats.bestDayProfit, dayProfit);
+
+    state.day += 1;
+    state.phase = 'shop';
+    ensureNextDay(state);                    // tomorrow's specials + goal, for the shop
+
+    // milestones that settle at close of books (profit/earnings)
+    const lateHits = checkMilestones(state);
+    let lateBonus = 0;
+    for (const def of lateHits) {
+      state.money += def.reward;
+      lateBonus += def.reward;
+    }
+    state.lastDay.bonus += lateBonus;
+    saveGame(state);
 
     const el = g.dom.dayend;
     el.classList.remove('hidden');
@@ -29,15 +58,24 @@ export const DayEndScene = {
       tickCD: 0,
       starsShown: 0,
       done: false,
+      lateHits,
     };
 
-    const total = stats.sales + stats.tips;
+    const bonusTotal = stats.bonus + lateBonus;
+    const total = stats.sales + stats.tips + bonusTotal;
     ui.lines = [
       { label: `Pizzas served × ${stats.served}`, value: stats.sales, money: true },
       { label: 'Tips', value: stats.tips, money: true },
+    ];
+    if (bonusTotal > 0) ui.lines.push({ label: 'Goals & milestones 🎯', value: bonusTotal, money: true });
+    if (stats.goalDesc) {
+      ui.lines.push({ label: `Daily goal: ${stats.goalDesc}`, value: stats.goalHit ? '✓' : '✗', money: false });
+    }
+    if (restockSpend > 0) ui.lines.push({ label: 'Restock paid yesterday', value: '−' + gbp(restockSpend), money: false });
+    ui.lines.push(
       { label: `Walk-outs × ${stats.lost}`, value: stats.lost > 0 ? '1★ each' : '—', money: false },
       { label: 'Avg satisfaction', value: stats.served ? Math.round(stats.satAvg) + '%' : '—', money: false },
-    ];
+    );
     ui.total = total;
 
     el.innerHTML = `
@@ -49,12 +87,29 @@ export const DayEndScene = {
           <div class="rc-star-row">${'<span class="rc-star">★</span>'.repeat(5)}</div>
           <div class="rc-rating-delta"></div>
         </div>
-        <button class="btn btn-big hidden" id="btn-to-shop">TO THE SHOP ➜</button>
+        <div class="rc-btns hidden" id="rc-btns">
+          <button class="btn" id="btn-analytics">📊 ANALYTICS</button>
+          <button class="btn btn-big" id="btn-to-shop">TO THE SHOP ➜</button>
+        </div>
+      </div>
+      <div class="an-wrap hidden" id="an-wrap">
+        ${analyticsHTML(state)}
+        <button class="btn" id="btn-an-back">⬅ BACK</button>
       </div>`;
 
     el.querySelector('#btn-to-shop').addEventListener('click', () => {
       Sfx.press();
       g.setScene('shop');
+    });
+    el.querySelector('#btn-analytics').addEventListener('click', () => {
+      Sfx.press();
+      el.querySelector('.receipt').classList.add('hidden');
+      el.querySelector('#an-wrap').classList.remove('hidden');
+    });
+    el.querySelector('#btn-an-back').addEventListener('click', () => {
+      Sfx.press();
+      el.querySelector('#an-wrap').classList.add('hidden');
+      el.querySelector('.receipt').classList.remove('hidden');
     });
   },
 
@@ -104,6 +159,7 @@ export const DayEndScene = {
       totEl.classList.add('slam-in');
       el.querySelector('#rc-total-num').textContent = gbp(ui.total);
       Sfx.chaChing();
+      if (ui.lateHits.length) Sfx.fanfare();
       ui.lineT = 0;
       return;
     }
@@ -129,7 +185,7 @@ export const DayEndScene = {
         const dEl = el.querySelector('.rc-rating-delta');
         dEl.textContent = `${rating.toFixed(1)} ★  (${delta >= 0 ? '+' : ''}${delta.toFixed(1)})`;
         dEl.className = 'rc-rating-delta ' + (delta >= 0 ? 'up' : 'down');
-        el.querySelector('#btn-to-shop').classList.remove('hidden');
+        el.querySelector('#rc-btns').classList.remove('hidden');
         ui.done = true;
       }
     }

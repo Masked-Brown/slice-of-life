@@ -40,6 +40,7 @@ const game = {
     hud: $('ui-hud'),
     ticket: $('ui-ticket'),
     dayend: $('ui-dayend'),
+    dayboard: $('ui-dayboard'),
     shop: $('ui-shop'),
     tutorial: $('ui-tutorial'),
     hudMoney: $('hud-money'),
