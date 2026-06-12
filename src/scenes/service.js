@@ -150,6 +150,7 @@ export const ServiceScene = {
   _onStormOut(c, wasFront) {
     svc.lost++;
     pushRating(svc.state, 1);
+    if (c.regular) pushRating(svc.state, 1);   // letting a regular walk stings double
     if (wasFront) this._abortOrder();
     this._updateHUD();
   },

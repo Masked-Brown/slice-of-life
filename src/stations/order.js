@@ -4,9 +4,9 @@
 // =====================================================================
 
 import { BAL, TOPPING_ORDER } from '../balance.js';
-import { clamp, lerp, rand, randi, pick, Juice, Ease } from '../juice.js';
+import { clamp, lerp, rand, randi, pick, Juice, Ease, rr } from '../juice.js';
 import { Sfx } from '../audio.js';
-import { customersForDay, queueSlots, patienceMult } from '../state.js';
+import { customersForDay, queueSlots, patienceMult, currentRating } from '../state.js';
 
 const OUTLINE = '#4a2e1d';
 
@@ -28,15 +28,35 @@ export const Orders = {
   // ---- day generation -----------------------------------------------------
   generateDay(state) {
     const total = customersForDay(state) + (state.boosts.ad ? BAL.BOOSTS.AD_EXTRA_CUSTOMERS : 0);
+    const R = BAL.REGULARS;
+    const chance = clamp(
+      R.CHANCE + (currentRating(state) - BAL.RATING.START) * R.RATING_CHANCE_BONUS,
+      0, R.MAX_CHANCE);
+    const usedRegulars = new Set();
     const list = [];
-    for (let i = 0; i < total; i++) list.push(this._makeCustomer(state, i));
+    for (let i = 0; i < total; i++) {
+      let c = null;
+      if (Math.random() < chance) {
+        const eligible = Object.entries(R.LIST).filter(([key, r]) =>
+          !usedRegulars.has(key)
+          && r.fav.toppings.every(t => state.toppings.includes(t.type))
+          && (r.fav.size !== 'L' || state.sizeL));
+        if (eligible.length) {
+          const [key, r] = pick(eligible);
+          usedRegulars.add(key);
+          c = this._makeRegular(state, key, r);
+        }
+      }
+      list.push(c || this._makeCustomer(state, i));
+    }
     return list;
   },
 
   _makeCustomer(state, i) {
     return {
       id: nextId++,
-      ticket: this.makeTicket(state),
+      ticket: this.makeTicket(state, (state.nextDay && state.nextDay.specials) || []),
+      regular: null,
       colors: {
         skin: pick(SKINS), shirt: pick(SHIRTS), hair: pick(HAIRS),
         hat: Math.random() < 0.25,
@@ -52,7 +72,20 @@ export const Orders = {
     };
   },
 
-  makeTicket(state) {
+  // a regular: fixed look, fixed signature order
+  _makeRegular(state, key, r) {
+    const c = this._makeCustomer(state, 0);
+    c.regular = { key, name: r.name };
+    c.colors = { skin: r.skin, shirt: r.shirt, hair: r.hair, hat: r.hat };
+    c.ticket = {
+      size: r.fav.size, sauce: r.fav.sauce, cheese: r.fav.cheese, bake: r.fav.bake,
+      toppings: r.fav.toppings.map(t => ({ ...t })),
+      special: false,
+    };
+    return c;
+  },
+
+  makeTicket(state, specials = []) {
     const O = BAL.ORDERS;
     const sizes = state.sizeL && Math.random() < O.SIZE_L_CHANCE ? ['L'] : ['S', 'M'];
     const size = pick(sizes);
@@ -62,12 +95,16 @@ export const Orders = {
       state.toppings.length,
     );
     const nTypes = randi(1, maxTypes);
-    const pool = TOPPING_ORDER.filter(t => state.toppings.includes(t));
+    // weighted pick: today's specials show up on far more tickets
+    const pool = TOPPING_ORDER.filter(t => state.toppings.includes(t))
+      .map(t => ({ t, w: specials.includes(t) ? BAL.SPECIALS.WEIGHT : 1 }));
     const chosen = [];
     while (chosen.length < nTypes && pool.length) {
-      const t = pick(pool);
-      pool.splice(pool.indexOf(t), 1);
-      chosen.push(t);
+      let r = Math.random() * pool.reduce((a, p) => a + p.w, 0);
+      let idx = 0;
+      for (; idx < pool.length - 1; idx++) { r -= pool[idx].w; if (r <= 0) break; }
+      chosen.push(pool[idx].t);
+      pool.splice(idx, 1);
     }
     const [lo, hi] = O.COUNT_RANGE[size];
     return {
@@ -76,6 +113,7 @@ export const Orders = {
       cheese: pick(['light', 'normal', 'heavy']),
       bake: pick(['light', 'normal', 'well']),
       toppings: chosen.map(type => ({ type, count: randi(lo, hi) })),
+      special: chosen.some(t => specials.includes(t)),
     };
   },
 
@@ -193,6 +231,8 @@ export const Orders = {
     el.innerHTML = `
       <div class="tk-pin"></div>
       <div class="tk-head">ORDER <span>#${svc.orderIndex}</span></div>
+      ${c.regular ? `<div class="tk-reg">⭐ for ${c.regular.name}</div>` : ''}
+      ${t.special ? `<div class="tk-special">★ today's special · +${Math.round(BAL.SPECIALS.PRICE_PREMIUM * 100)}%</div>` : ''}
       <div class="tk-row"><span class="tk-lbl">SIZE</span><span class="tk-chip tk-size">${t.size}</span></div>
       <div class="tk-row"><span class="tk-lbl">SAUCE</span><span class="tk-chip lv-${t.sauce}">${t.sauce}</span></div>
       <div class="tk-row"><span class="tk-lbl">CHEESE</span><span class="tk-chip lv-${t.cheese}">${t.cheese}</span></div>
@@ -304,6 +344,20 @@ export const Orders = {
     }
 
     ctx.restore();
+
+    // regular's name tag above the patience arc
+    if (c.regular && c.state !== 'pending') {
+      ctx.save();
+      ctx.font = '900 12px Trebuchet MS, system-ui, sans-serif';
+      const w = ctx.measureText(c.regular.name).width + 18;
+      rr(ctx, x - w / 2, y - 94, w, 21, 10);
+      ctx.fillStyle = '#fffbef'; ctx.fill();
+      ctx.lineWidth = 2.5; ctx.strokeStyle = OUTLINE; ctx.stroke();
+      ctx.fillStyle = '#4a2e1d';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(c.regular.name, x, y - 82.5);
+      ctx.restore();
+    }
 
     // patience meter (arc above head)
     if (c.state === 'queued' || c.state === 'front') {

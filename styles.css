@@ -244,6 +244,28 @@ html, body {
   letter-spacing: 1px;
 }
 .tk-head span { color: #a3886a; }
+.tk-reg {
+  text-align: center;
+  font-weight: 900;
+  font-size: 13px;
+  color: #2e7d44;
+  background: #e7f3dc;
+  border: 2px solid var(--green);
+  border-radius: 999px;
+  padding: 2px 8px;
+  margin-bottom: 6px;
+}
+.tk-special {
+  text-align: center;
+  font-weight: 900;
+  font-size: 12px;
+  color: #8a5a00;
+  background: #fdeec0;
+  border: 2px dashed var(--gold);
+  border-radius: 999px;
+  padding: 2px 8px;
+  margin-bottom: 6px;
+}
 .tk-row {
   display: flex;
   align-items: center;
