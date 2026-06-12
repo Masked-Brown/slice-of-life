@@ -22,6 +22,17 @@ const RAIL_Y = 170;
 const STAGE_RAIL = ['dough', 'sauce', 'cheese', 'toppings', 'bake', 'serve'];
 const RAIL_LABEL = { dough: 'DOUGH', sauce: 'SAUCE', cheese: 'CHEESE', toppings: 'TOPPINGS', bake: 'BAKE', serve: 'SERVE' };
 
+// always-on one-liner under the rail — what to do right now
+const STAGE_HINT = {
+  dough: 'Click the dough size from the ticket',
+  sauce: 'Hold over the pizza to pour — release in the gold band',
+  cheese: 'Hold to sprinkle — release in the gold band',
+  toppings: 'Drag pieces on — match the ×counts on the ticket',
+  tooven: 'Slide the pizza into the oven',
+  baking: 'Watch the meter — click to pull in the zone!',
+  serve: 'Ring the bell!',
+};
+
 const TUTORIAL = {
   dough: { text: 'Read the ticket, then click the matching dough ball.', x: 410, y: 320, dir: 'up' },
   sauce: { text: 'Press & HOLD over the pizza to pour sauce. Release inside the gold band on the gauge, then press NEXT.', x: 480, y: 540, dir: 'up' },
@@ -511,10 +522,18 @@ export const ServiceScene = {
     const tier = svc.state.upgrades.decor;
     const W = g.W;
 
-    // wall behind the queue
+    // wall behind the queue — warm two-tone with depth
     const wallColors = ['#e8d5ae', '#f2d9b0', '#f6e0bb', '#fbe7c4'];
-    ctx.fillStyle = wallColors[tier];
+    const wallLo = ['#dcc497', '#e6c898', '#eccfa2', '#f1d6ab'];
+    const wg = ctx.createLinearGradient(0, 0, 0, 152);
+    wg.addColorStop(0, wallColors[tier]);
+    wg.addColorStop(1, wallLo[tier]);
+    ctx.fillStyle = wg;
     ctx.fillRect(0, 0, W, 152);
+
+    // picture rail
+    ctx.fillStyle = 'rgba(74,46,29,0.18)';
+    ctx.fillRect(0, 140, W, 4);
 
     // accent paint band grows fancier with decor tier
     if (tier >= 1) {
@@ -528,6 +547,136 @@ export const ServiceScene = {
         ctx.moveTo(x, 16); ctx.lineTo(x + 18, 34); ctx.lineTo(x + 36, 16);
         ctx.closePath(); ctx.fill();
       }
+    }
+
+    ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE;
+
+    // window onto the street (daylight, rooftops)
+    ctx.save();
+    ctx.fillStyle = '#9c6b3c';
+    rr(ctx, 96, 26, 168, 104, 10); ctx.fill(); ctx.stroke();
+    rr(ctx, 106, 36, 148, 84, 6);
+    ctx.save();
+    ctx.clip();
+    const sky = ctx.createLinearGradient(0, 36, 0, 120);
+    sky.addColorStop(0, '#aed7ec');
+    sky.addColorStop(1, '#dceef7');
+    ctx.fillStyle = sky;
+    ctx.fillRect(106, 36, 148, 84);
+    // sun + drifting cloud
+    ctx.fillStyle = '#ffe9a8';
+    ctx.beginPath(); ctx.arc(232, 54, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    const cx = 120 + ((svc.elapsed * 3) % 180);
+    for (const [dx, r] of [[-14, 8], [0, 11], [14, 8]]) {
+      ctx.beginPath(); ctx.arc(cx + dx, 62, r, 0, Math.PI * 2); ctx.fill();
+    }
+    // rooftop silhouettes
+    ctx.fillStyle = '#b98a64';
+    ctx.beginPath();
+    ctx.moveTo(106, 120);
+    ctx.lineTo(106, 96); ctx.lineTo(130, 84); ctx.lineTo(154, 96);
+    ctx.lineTo(154, 104); ctx.lineTo(176, 104); ctx.lineTo(176, 88);
+    ctx.lineTo(204, 76); ctx.lineTo(232, 88); ctx.lineTo(232, 120);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    rr(ctx, 106, 36, 148, 84, 6); ctx.stroke();
+    // crossbars
+    ctx.fillStyle = '#9c6b3c';
+    ctx.fillRect(178, 36, 5, 84);
+    ctx.fillRect(106, 74, 148, 5);
+    ctx.restore();
+
+    // hanging menu board
+    ctx.save();
+    ctx.strokeStyle = '#8a6f4f'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(396, 0); ctx.lineTo(404, 26); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(504, 0); ctx.lineTo(496, 26); ctx.stroke();
+    ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE;
+    ctx.fillStyle = '#4a3526';
+    rr(ctx, 380, 26, 140, 74, 8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#3a2a1e';
+    rr(ctx, 388, 34, 124, 58, 5); ctx.fill();
+    ctx.fillStyle = '#fdf3dd';
+    ctx.font = '900 17px Trebuchet MS, system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('M E N U', 450, 50);
+    // chalk pizza doodle + squiggles
+    ctx.strokeStyle = 'rgba(253,243,221,0.75)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(412, 74, 10, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(404, 67); ctx.lineTo(420, 81); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(430, 70); ctx.lineTo(496, 70); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(430, 80); ctx.lineTo(482, 80); ctx.stroke();
+    ctx.restore();
+
+    // wooden shelf above the oven, stacked with supplies
+    ctx.save();
+    ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE;
+    // jars of passata
+    for (const jx of [968, 1000]) {
+      ctx.fillStyle = '#c23a1c';
+      rr(ctx, jx, 92, 24, 34, 5); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#8d8d96';
+      rr(ctx, jx + 2, 86, 20, 9, 3); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.fillRect(jx + 4, 98, 5, 22);
+    }
+    // olive jar
+    ctx.fillStyle = '#5d6e3a';
+    rr(ctx, 1036, 96, 22, 30, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#8d8d96';
+    rr(ctx, 1038, 90, 18, 9, 3); ctx.fill(); ctx.stroke();
+    // oil bottle
+    ctx.fillStyle = '#d9a429';
+    rr(ctx, 1072, 84, 14, 42, 5); ctx.fill(); ctx.stroke();
+    rr(ctx, 1075, 72, 8, 14, 3); ctx.fill(); ctx.stroke();
+    // flour sack
+    ctx.fillStyle = '#efe3c8';
+    ctx.beginPath();
+    ctx.moveTo(1106, 126);
+    ctx.quadraticCurveTo(1102, 92, 1112, 86);
+    ctx.quadraticCurveTo(1124, 78, 1138, 86);
+    ctx.quadraticCurveTo(1148, 92, 1144, 126);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#a3886a';
+    ctx.font = '900 11px Trebuchet MS, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('00', 1125, 110);
+    // stack of pizza boxes
+    ctx.fillStyle = '#d9b988';
+    for (let i = 0; i < 3; i++) {
+      rr(ctx, 1166, 110 - i * 13, 58, 12, 3); ctx.fill(); ctx.stroke();
+    }
+    // the shelf board itself
+    ctx.fillStyle = '#8a5a34';
+    rr(ctx, 944, 124, 292, 12, 5); ctx.fill(); ctx.stroke();
+    // brackets
+    ctx.fillStyle = '#6e4226';
+    ctx.fillRect(960, 136, 8, 10);
+    ctx.fillRect(1212, 136, 8, 10);
+    ctx.restore();
+
+    // string lights from decor tier 2
+    if (tier >= 2) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(74,46,29,0.5)'; ctx.lineWidth = 2.5;
+      for (let seg = 0; seg < 3; seg++) {
+        const x0 = 280 + seg * 230, x1 = x0 + 230;
+        ctx.beginPath();
+        ctx.moveTo(x0, 8);
+        ctx.quadraticCurveTo((x0 + x1) / 2, 34, x1, 8);
+        ctx.stroke();
+        for (let i = 1; i < 6; i++) {
+          const t = i / 6;
+          const lx = lerp(x0, x1, t);
+          const ly = 8 + 2 * (34 - 8) * t * (1 - t) + 5;
+          const tw = 0.7 + 0.3 * Math.sin(svc.elapsed * 2 + seg * 2 + i);
+          ctx.fillStyle = `rgba(255,213,74,${0.55 + 0.45 * tw})`;
+          ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      ctx.restore();
+      ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE;
     }
 
     // door (far left) — where customers come and go
@@ -630,6 +779,16 @@ export const ServiceScene = {
         ctx.globalAlpha = 1;
       }
       x += w + 14;
+    }
+
+    // what-to-do hint for the current stage
+    const hint = STAGE_HINT[svc.stage];
+    if (hint) {
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = '#fff6e0';
+      ctx.font = '800 13.5px Trebuchet MS, system-ui, sans-serif';
+      ctx.fillText(hint, 640, RAIL_Y + 20);
+      ctx.globalAlpha = 1;
     }
     ctx.restore();
   },
