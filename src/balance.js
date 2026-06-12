@@ -15,12 +15,12 @@ export const BAL = {
     BASE_PRICE: { S: 6, M: 9, L: 14 },        // £ by pizza size
     PRICE_PER_TOPPING_TYPE: 2.0,              // £ per topping TYPE on the order
     SAT_MULT_MIN: 0.4,                        // order value × this at 0 satisfaction
-    SAT_MULT_MAX: 1.15,                       // ...× this at 100 satisfaction
+    SAT_MULT_MAX: 1.12,                       // ...× this at 100 satisfaction
     TIP_START_SAT: 55,                        // no tip below this satisfaction
     TIP_KNEE_SAT: 85,                         // tip curve steepens above this
     TIP_KNEE_FRAC: 0.08,                      // tip fraction AT the knee
-    TIP_MAX_FRAC: 0.35,                       // tip fraction at 100 satisfaction
-    RATING_PRICE_MULT: 0.08,                  // price ×(1 + (rating-3) × this)
+    TIP_MAX_FRAC: 0.30,                       // tip fraction at 100 satisfaction
+    RATING_PRICE_MULT: 0.07,                  // price ×(1 + (rating-3) × this)
   },
 
   // ---- Day structure ----------------------------------------------------
@@ -112,19 +112,19 @@ export const BAL = {
   // ---- Upgrades (equipment tab) -----------------------------------------
   // costs: per tier (≈ ×2.2 per tier; tier1 ≈ one good day)
   UPGRADES: {
-    oven:   { name: 'Stone Oven',   costs: [60, 130, 280],
+    oven:   { name: 'Stone Oven',   costs: [90, 260, 600],
               tiers: ['Wider perfect zones', 'Even wider zones, hotter', 'Master oven — huge zones'] },
-    ladle:  { name: 'Sauce Ladle',  costs: [45, 100, 220],
+    ladle:  { name: 'Sauce Ladle',  costs: [70, 200, 480],
               tiers: ['Faster pour', 'Steadier pour near the band', 'Pro ladle — pinpoint control'] },
-    shaker: { name: 'Cheese Shaker', costs: [45, 100, 220],
+    shaker: { name: 'Cheese Shaker', costs: [70, 200, 480],
               tiers: ['Faster sprinkle', 'Steadier hand near the band', 'Blizzard mode — fast & precise'] },
-    tongs:  { name: 'Topping Tongs', costs: [60, 135, 290],
+    tongs:  { name: 'Topping Tongs', costs: [90, 270, 630],
               tiers: ['Edge-save grip', 'Neat-grid snapping', 'Double-grab'] },
-    decor:  { name: 'Counter & Decor', costs: [70, 150, 320],
+    decor:  { name: 'Counter & Decor', costs: [110, 300, 690],
               tiers: ['Fresh paint, +1 queue slot, patience +15%',
                       'Plants & art, +1 slot, patience +15%',
                       'Full refit, +1 slot, patience +15%'] },
-    supply: { name: 'Supply Deals', costs: [45, 100, 220, 480],
+    supply: { name: 'Supply Deals', costs: [70, 195, 460, 980],
               tiers: ['Bulk paper: restock −10%', 'Local farm deal: restock −20%',
                       'Wholesale account: restock −35%', 'Importer contract: restock −50%'] },
   },
@@ -135,19 +135,19 @@ export const BAL = {
   TOPPINGS: {
     pepperoni: { label: 'Pepperoni', cost: 0,   unit: 0.10, dot: '#d8442e' },
     mushroom:  { label: 'Mushroom',  cost: 0,   unit: 0.09, dot: '#e8d9bd' },
-    onion:     { label: 'Onion',     cost: 35,  unit: 0.08, dot: '#c39bd3' },
-    olive:     { label: 'Olive',     cost: 50,  unit: 0.12, dot: '#3d4a26' },
-    pepper:    { label: 'Pepper',    cost: 70,  unit: 0.12, dot: '#4caf50' },
-    ham:       { label: 'Ham',       cost: 90,  unit: 0.16, dot: '#f48fb1' },
-    pineapple: { label: 'Pineapple', cost: 115, unit: 0.18, dot: '#f6c945' },
-    chilli:    { label: 'Chilli',    cost: 150, unit: 0.20, dot: '#e53935' },
+    onion:     { label: 'Onion',     cost: 60,  unit: 0.08, dot: '#c39bd3' },
+    olive:     { label: 'Olive',     cost: 95,  unit: 0.12, dot: '#3d4a26' },
+    pepper:    { label: 'Pepper',    cost: 130, unit: 0.12, dot: '#4caf50' },
+    ham:       { label: 'Ham',       cost: 170, unit: 0.16, dot: '#f48fb1' },
+    pineapple: { label: 'Pineapple', cost: 220, unit: 0.18, dot: '#f6c945' },
+    chilli:    { label: 'Chilli',    cost: 280, unit: 0.20, dot: '#e53935' },
   },
-  SIZE_L_COST: 120,
+  SIZE_L_COST: 220,
 
   // ---- Stock / restock -----------------------------------------------------
   STOCK: {
     START: 24,                   // starting stock per starter topping
-    NEW_TOPPING_INCLUDED: 15,    // stock included when a topping is unlocked
+    NEW_TOPPING_INCLUDED: 20,    // stock included when a topping is unlocked
     LOW_AT: 6,                   // low-stock warning threshold (amber)
     BUY_AMOUNTS: [5, 20],        // restock button quantities
   },
@@ -193,34 +193,34 @@ export const BAL = {
   // ---- Lifetime milestones (one-off cash bonuses) ---------------------------
   // stat: see goals.js metrics(). ratingBump: × five-star ratings pushed on hit.
   MILESTONES: [
-    { id: 'serve25',     label: 'Serve 25 pizzas',            stat: 'served',        target: 25,   reward: 30 },
-    { id: 'serve100',    label: 'Serve 100 pizzas',           stat: 'served',        target: 100,  reward: 90 },
-    { id: 'serve250',    label: 'Serve 250 pizzas',           stat: 'served',        target: 250,  reward: 200 },
-    { id: 'serve500',    label: 'Serve 500 pizzas',           stat: 'served',        target: 500,  reward: 400 },
-    { id: 'earn250',     label: '£250 lifetime takings',      stat: 'earned',        target: 250,  reward: 25 },
-    { id: 'earn1000',    label: '£1,000 lifetime takings',    stat: 'earned',        target: 1000, reward: 70 },
-    { id: 'earn5000',    label: '£5,000 lifetime takings',    stat: 'earned',        target: 5000, reward: 250 },
-    { id: 'stars3',      label: 'Hold a 3★ rating',           stat: 'rating',        target: 3,    reward: 15 },
-    { id: 'stars4',      label: 'Reach a 4★ rating',          stat: 'rating',        target: 4,    reward: 50 },
-    { id: 'stars5',      label: 'Reach a 5★ rating',          stat: 'rating',        target: 5,    reward: 150 },
-    { id: 'perfect10',   label: '10 perfect pizzas',          stat: 'perfects',      target: 10,   reward: 40,  ratingBump: 1 },
-    { id: 'perfect50',   label: '50 perfect pizzas',          stat: 'perfects',      target: 50,   reward: 150, ratingBump: 1 },
-    { id: 'streak5',     label: '5 perfect pizzas in a row',  stat: 'bestStreak',    target: 5,    reward: 60,  ratingBump: 1 },
-    { id: 'upgrades5',   label: 'Own 5 upgrade tiers',        stat: 'upgradesOwned', target: 5,    reward: 50 },
-    { id: 'allToppings', label: 'Unlock every topping',       stat: 'toppingsOwned', target: 8,    reward: 120 },
-    { id: 'profit100',   label: 'A £100-profit day',          stat: 'bestDayProfit', target: 100,  reward: 60 },
+    { id: 'serve25',     label: 'Serve 25 pizzas',            stat: 'served',        target: 25,   reward: 22 },
+    { id: 'serve100',    label: 'Serve 100 pizzas',           stat: 'served',        target: 100,  reward: 70 },
+    { id: 'serve250',    label: 'Serve 250 pizzas',           stat: 'served',        target: 250,  reward: 180 },
+    { id: 'serve500',    label: 'Serve 500 pizzas',           stat: 'served',        target: 500,  reward: 380 },
+    { id: 'earn250',     label: '£250 lifetime takings',      stat: 'earned',        target: 250,  reward: 18 },
+    { id: 'earn1000',    label: '£1,000 lifetime takings',    stat: 'earned',        target: 1000, reward: 55 },
+    { id: 'earn5000',    label: '£5,000 lifetime takings',    stat: 'earned',        target: 5000, reward: 220 },
+    { id: 'stars3',      label: 'Hold a 3★ rating',           stat: 'rating',        target: 3,    reward: 12 },
+    { id: 'stars4',      label: 'Reach a 4★ rating',          stat: 'rating',        target: 4,    reward: 40 },
+    { id: 'stars5',      label: 'Reach a 5★ rating',          stat: 'rating',        target: 5,    reward: 130 },
+    { id: 'perfect10',   label: '10 perfect pizzas',          stat: 'perfects',      target: 10,   reward: 32,  ratingBump: 1 },
+    { id: 'perfect50',   label: '50 perfect pizzas',          stat: 'perfects',      target: 50,   reward: 130, ratingBump: 1 },
+    { id: 'streak5',     label: '5 perfect pizzas in a row',  stat: 'bestStreak',    target: 5,    reward: 50,  ratingBump: 1 },
+    { id: 'upgrades5',   label: 'Own 5 upgrade tiers',        stat: 'upgradesOwned', target: 5,    reward: 40 },
+    { id: 'allToppings', label: 'Unlock every topping',       stat: 'toppingsOwned', target: 8,    reward: 110 },
+    { id: 'profit100',   label: 'A £100-profit day',          stat: 'bestDayProfit', target: 100,  reward: 50 },
   ],
-  MILESTONE_MIN_RATINGS: 8,      // star milestones need this many rated customers
+  MILESTONE_MIN_RATINGS: 12,     // star milestones need this many rated customers
 
   // ---- Daily goals (one rotating goal per day) ---------------------------------
   // needs: 'sizeL' | 'manyToppings' gate availability
   DAILY_GOALS: [
-    { id: 'noStorms', desc: 'No walk-outs all day',                       short: 'No walk-outs',     reward: 14 },
-    { id: 'sat90',    desc: 'Finish the day at 90%+ avg satisfaction',    short: '90% satisfaction', reward: 16 },
-    { id: 'sellL',    desc: 'Sell 3 large pizzas',                        short: '3 large pizzas',   reward: 15, target: 3, needs: 'sizeL' },
-    { id: 'perfect2', desc: 'Serve 2 perfect pizzas',                     short: '2 perfects',       reward: 18, target: 2 },
-    { id: 'useAll',   desc: 'Use every topping at least once',            short: 'Use every topping', reward: 15, needs: 'manyToppings' },
-    { id: 'fast5',    desc: 'Serve 5 orders under par time',              short: '5 fast orders',    reward: 15, target: 5 },
+    { id: 'noStorms', desc: 'No walk-outs all day',                       short: 'No walk-outs',     reward: 11 },
+    { id: 'sat90',    desc: 'Finish the day at 90%+ avg satisfaction',    short: '90% satisfaction', reward: 13 },
+    { id: 'sellL',    desc: 'Sell 3 large pizzas',                        short: '3 large pizzas',   reward: 12, target: 3, needs: 'sizeL' },
+    { id: 'perfect2', desc: 'Serve 2 perfect pizzas',                     short: '2 perfects',       reward: 14, target: 2 },
+    { id: 'useAll',   desc: 'Use every topping at least once',            short: 'Use every topping', reward: 12, needs: 'manyToppings' },
+    { id: 'fast5',    desc: 'Serve 5 orders under par time',              short: '5 fast orders',    reward: 12, target: 5 },
   ],
   DAILY_GOAL_MANY_TOPPINGS: 4,   // 'useAll' offered once you own this many
 
