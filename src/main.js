@@ -45,6 +45,7 @@ const game = {
     hudMoney: $('hud-money'),
     hudDay: $('hud-day'),
     hudProgress: $('hud-progress'),
+    hudGoal: $('hud-goal'),
     hudStars: $('hud-stars-fg'),
     hudRatingNum: $('hud-rating-num'),
     btnMute: $('btn-mute'),

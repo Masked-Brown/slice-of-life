@@ -8,6 +8,7 @@ import { BAL } from '../balance.js';
 import { clamp, lerp, rand, Juice, Ease, rr } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { currentRating, pushRating, saveGame, gbp } from '../state.js';
+import { ensureNextDay, checkMilestones, goalProgress } from '../goals.js';
 import { Orders } from '../stations/order.js';
 import { Build, PIZZA_POS, TRAY, NEXT_BTN, BINS_Y } from '../stations/build.js';
 import { Oven, OVEN } from '../stations/oven.js';
@@ -35,6 +36,7 @@ export const ServiceScene = {
 
   enter(g) {
     const state = g.state;
+    const plan = ensureNextDay(state);        // today's specials + daily goal
     svc = {
       game: g, state,
       elapsed: 0,
@@ -50,6 +52,9 @@ export const ServiceScene = {
       served: 0, lost: 0, sales: 0, tipsTotal: 0, sats: [],
       usage: {}, toppingRevenue: {},          // per-topping analytics for the day
       lowWarned: {}, outWarned: {},           // one stock warning per topping per day
+      goal: { ...plan.goal, hit: false, failed: false },
+      bonusEarned: 0,                         // goal + milestone cash won today
+      largeSold: 0, perfectsToday: 0, underPar: 0, usedTypes: new Set(),
       prepLeft: state.boosts.prep ? BAL.BOOSTS.PREP_PIZZAS : 0,
       ratingAtStart: currentRating(state),
       orderIndex: 0,
@@ -139,7 +144,17 @@ export const ServiceScene = {
     svc.stage = 'serve';
   },
 
-  _onOrderDone() {
+  _onOrderDone(res) {
+    // daily-goal + milestone bookkeeping (ticket is still pinned here)
+    if (res) {
+      const t = svc.ticket;
+      if (t && t.size === 'L') svc.largeSold++;
+      if (res.perfect) svc.perfectsToday++;
+      if (res.elapsed <= res.par) svc.underPar++;
+      for (const k in svc.usage) if (svc.usage[k] > 0) svc.usedTypes.add(k);
+      this._checkGoal();
+      this._checkMilestones();
+    }
     Orders.unpinTicket(svc);
     svc.ticket = null;
     svc.stage = 'idle';
@@ -147,11 +162,49 @@ export const ServiceScene = {
     this._updateHUD();
   },
 
+  _checkGoal() {
+    const goal = svc.goal;
+    if (!goal || goal.hit || goal.failed) return;
+    const p = goalProgress(goal, svc);
+    if (p.failed) { goal.failed = true; return; }
+    if (p.done) {
+      goal.hit = true;
+      svc.state.money += goal.reward;
+      svc.bonusEarned += goal.reward;
+      const g = svc.game;
+      Juice.stamp(640, 270, 'DAILY GOAL!', { color: '#9fe07c', size: 46 });
+      Juice.floatText(640, 330, '+' + gbp(goal.reward), { color: '#ffd54a', size: 28 });
+      Juice.coinBurst(640, 300, g.hudMoneyPos.x, g.hudMoneyPos.y, 8, () => Sfx.coin());
+      Sfx.goalDing();
+    }
+  },
+
+  _checkMilestones() {
+    const hit = checkMilestones(svc.state);
+    const g = svc.game;
+    hit.forEach((def, i) => {
+      svc.state.money += def.reward;
+      svc.bonusEarned += def.reward;
+      Juice.tween({
+        dur: 0.01, delay: 0.55 * i,
+        onDone: () => {
+          Juice.stamp(640, 215, `MILESTONE!`, { color: '#ffd54a', size: 42 });
+          Juice.floatText(640, 268, def.label, { color: '#fff6e0', size: 22 });
+          Juice.floatText(640, 300, '+' + gbp(def.reward), { color: '#9fe07c', size: 26 });
+          Juice.coinBurst(640, 250, g.hudMoneyPos.x, g.hudMoneyPos.y, 10, () => Sfx.coin());
+          Juice.confetti(640, 235, 22);
+          Sfx.fanfare();
+        },
+      });
+    });
+  },
+
   _onStormOut(c, wasFront) {
     svc.lost++;
     pushRating(svc.state, 1);
     if (c.regular) pushRating(svc.state, 1);   // letting a regular walk stings double
     if (wasFront) this._abortOrder();
+    this._checkGoal();                         // a storm-out sinks 'no walk-outs'
     this._updateHUD();
   },
 
@@ -214,6 +267,7 @@ export const ServiceScene = {
     if (svc.pending.length === 0 && svc.customers.length === 0 && svc.stage === 'idle'
         && (svc.served + svc.lost) >= svc.totalCustomers && svc.totalCustomers > 0) {
       svc.dayEndQueued = true;
+      this._checkGoal();           // all-day goals (no walk-outs, 90% sat) settle now
       const stats = {
         day: svc.state.day,
         served: svc.served, lost: svc.lost,
@@ -250,6 +304,19 @@ export const ServiceScene = {
 
     const progTxt = `Served ${svc.served + svc.lost} / ${svc.totalCustomers}`;
     if (force || d.hudProgress.textContent !== progTxt) d.hudProgress.textContent = progTxt;
+
+    // daily goal pill
+    if (svc.goal) {
+      const p = goalProgress(svc.goal, svc);
+      const goalTxt = svc.goal.hit ? `🎯 ${svc.goal.short} ✓`
+        : svc.goal.failed ? `🎯 ${svc.goal.short} ✗`
+        : `🎯 ${svc.goal.short} · ${p.prog}/${p.target}`;
+      if (force || d.hudGoal.textContent !== goalTxt) {
+        d.hudGoal.textContent = goalTxt;
+        d.hudGoal.classList.toggle('hud-goal-done', svc.goal.hit);
+        d.hudGoal.classList.toggle('hud-goal-failed', svc.goal.failed);
+      }
+    }
 
     const rating = currentRating(s);
     d.hudStars.style.width = (rating / 5 * 100) + '%';

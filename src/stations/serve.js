@@ -126,7 +126,7 @@ export const Score = {
 
     return {
       accuracy: Math.round(accuracy), satisfaction, perfect, burnt: bake.burnt,
-      pay, tip, stars, par, price,
+      pay, tip, stars, par, price, elapsed,
       breakdown: { sizeFrac, sauceFrac, cheeseFrac, topFrac: top.frac, bakeFrac: bake.frac },
     };
   },
@@ -187,6 +187,13 @@ export const Serve = {
     state.money += total;
     state.stats.lifetimeServed++;
     state.stats.lifetimeEarned += total;
+    if (res.perfect) {
+      state.stats.lifetimePerfects++;
+      state.stats.perfectStreak++;
+      state.stats.bestPerfectStreak = Math.max(state.stats.bestPerfectStreak, state.stats.perfectStreak);
+    } else {
+      state.stats.perfectStreak = 0;
+    }
     pushRating(state, res.stars);
     if (cust.regular) pushRating(state, res.stars);
     svc.served++;
