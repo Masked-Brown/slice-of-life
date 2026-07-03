@@ -28,7 +28,10 @@ export function ensureNextDay(state) {
   // rotate through whichever goals the player can actually attempt
   const feasible = BAL.DAILY_GOALS.filter(g =>
     (g.needs !== 'sizeL' || state.sizeL) &&
-    (g.needs !== 'manyToppings' || state.toppings.length >= BAL.DAILY_GOAL_MANY_TOPPINGS));
+    (g.needs !== 'manyToppings' || state.toppings.length >= BAL.DAILY_GOAL_MANY_TOPPINGS) &&
+    (g.needs !== 'sides' || state.sides.length > 0) &&
+    (g.needs !== 'recipes' || Orders.availableRecipes(state).length > 0) &&
+    (g.needs !== 'loyalty' || unlocked(state, 'system', 'loyalty')));
   const goal = { ...feasible[(state.day - 1) % feasible.length] };
 
   // phone pre-order offers: known tickets, fixed due points, player's call.
@@ -54,6 +57,16 @@ export function ensureNextDay(state) {
 // ---- milestone metrics ---------------------------------------------------
 export function metrics(state) {
   const s = state.stats;
+  const loyaltyTiers = Object.values(state.loyalty || {}).map(l => {
+    let tier = 0;
+    for (const need of BAL.LOYALTY.TIERS) if ((l.stamps | 0) >= need) tier++;
+    return tier;
+  });
+  const masteryStarsTotal = Object.values(state.mastery || {}).reduce((a, m) => {
+    let stars = 0;
+    for (const need of BAL.MASTERY.STARS_AT) if ((m.perfects | 0) >= need) stars++;
+    return a + stars;
+  }, 0);
   return {
     served: s.lifetimeServed,
     earned: s.lifetimeEarned,
@@ -65,6 +78,15 @@ export function metrics(state) {
     // seasonal rotators don't count toward permanent-roster milestones
     toppingsOwned: state.toppings.filter(t => BAL.TOPPINGS[t] && !BAL.TOPPINGS[t].seasonal).length,
     bestDayProfit: s.bestDayProfit,
+    level: state.level,
+    specialtiesSold: s.specialtiesSold | 0,
+    sidesSoldLife: s.sidesSoldLife | 0,
+    preordersOnTime: s.preordersOnTime | 0,
+    eventsSeen: s.eventsSeen | 0,
+    zeroWasteDays: s.zeroWasteDays | 0,
+    raveReviews: s.raveReviews | 0,
+    loyaltyTop: loyaltyTiers.length ? Math.max(...loyaltyTiers) : 0,
+    masteryStarsTotal,
   };
 }
 
@@ -106,6 +128,12 @@ export function goalProgress(goal, svc) {
                done: svc.usedTypes.size >= svc.state.toppings.length, failed: false };
     case 'fast5':
       return { prog: svc.underPar, target: goal.target, done: svc.underPar >= goal.target, failed: false };
+    case 'sides3':
+      return { prog: svc.sidesSold || 0, target: goal.target, done: (svc.sidesSold || 0) >= goal.target, failed: false };
+    case 'spec2':
+      return { prog: svc.specialtiesToday || 0, target: goal.target, done: (svc.specialtiesToday || 0) >= goal.target, failed: false };
+    case 'stamps2':
+      return { prog: svc.stampsToday || 0, target: goal.target, done: (svc.stampsToday || 0) >= goal.target, failed: false };
     default:
       return { prog: 0, target: 1, done: false, failed: false };
   }

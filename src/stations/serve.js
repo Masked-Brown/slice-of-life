@@ -7,7 +7,7 @@ import { BAL } from '../balance.js';
 import { clamp, lerp, Juice, rand } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { priceMultiplier, pushRating, gbp, tipMult } from '../state.js';
-import { orderXP, masteryStars, recordMastery, loyaltyTier, recordLoyalty } from '../progress.js';
+import { orderXP, masteryStars, recordMastery, loyaltyTier, recordLoyalty, unlocked } from '../progress.js';
 import { Orders } from './order.js';
 
 const BAKE_ORDER = ['raw', 'light', 'normal', 'well', 'burnt'];
@@ -288,6 +288,11 @@ export const Serve = {
     res.light = light;
     res.ticketServed = ticket;
 
+    // specialty bookkeeping (group pizzas count individually)
+    if (ticket.specialty) {
+      svc.specialtiesToday = (svc.specialtiesToday || 0) + 1;
+      svc.state.stats.specialtiesSold = (svc.state.stats.specialtiesSold | 0) + 1;
+    }
     // recipe mastery: every perfect specialty (group pizzas included) counts
     if (ticket.specialty && res.perfect) {
       const starUp = recordMastery(svc.state, ticket.specialty);
@@ -396,6 +401,7 @@ export const Serve = {
       res.tip += res.price * (R.TIP_BONUS_FRAC + BAL.LOYALTY.TIP_BONUS[tier]);
       if (res.satisfaction >= BAL.LOYALTY.SAT_THRESHOLD) {
         const tierUp = recordLoyalty(state, cust.regular.key);
+        if (unlocked(state, 'system', 'loyalty')) svc.stampsToday = (svc.stampsToday || 0) + 1;
         const stamps = state.loyalty[cust.regular.key] ? state.loyalty[cust.regular.key].stamps : 0;
         if (tierUp) {
           Juice.stamp(640, 210, `${cust.regular.name.toUpperCase()} — CARD TIER ${tierUp}!`, { color: '#9fe07c', size: 38 });
@@ -424,6 +430,7 @@ export const Serve = {
         state.money += D.reward;
         svc.bonusEarned += D.reward;
         state.criticBoost = D.footfallBoost;
+        state.stats.raveReviews = (state.stats.raveReviews | 0) + 1;
         pushRating(state, 5); pushRating(state, 5);
         svc.eventReport = `The critic filed a rave review (+${gbp(D.reward)}, word spreads for tomorrow).`;
         Juice.stamp(640, 250, 'RAVE REVIEW!', { color: '#9fe07c', size: 48 });
@@ -476,6 +483,7 @@ export const Serve = {
       svc.sideRevenue = svc.sideRevenue || {};
       svc.sideRevenue[res.sideKey] = (svc.sideRevenue[res.sideKey] || 0) + res.sidePay;
       svc.sidesSold = (svc.sidesSold || 0) + 1;
+      state.stats.sidesSoldLife = (state.stats.sidesSoldLife | 0) + 1;
       Juice.floatText(cust.x - 46, cust.y - 118, '+' + gbp(res.sidePay) + ' side', { color: '#8fd0f0', size: 18 });
     }
 
@@ -543,8 +551,12 @@ export const Serve = {
       cust.preorder.done = true;
       cust.preorder.late = (res.lateSat || 0) < 0;
       svc.preordersDone = (svc.preordersDone || 0) + 1;
-      if (cust.preorder.late) svc.preordersLate = (svc.preordersLate || 0) + 1;
-      else svc.onXP(BAL.XP.PREORDER, cust.x, cust.y - 20);
+      if (cust.preorder.late) {
+        svc.preordersLate = (svc.preordersLate || 0) + 1;
+      } else {
+        state.stats.preordersOnTime = (state.stats.preordersOnTime | 0) + 1;
+        svc.onXP(BAL.XP.PREORDER, cust.x, cust.y - 20);
+      }
     }
 
     // chef XP — accuracy is the multiplier, perfection the cherry

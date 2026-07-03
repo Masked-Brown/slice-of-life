@@ -37,6 +37,9 @@ export function newGame(muted = false) {
       lifetimeServed: 0, lifetimeEarned: 0,
       lifetimePerfects: 0, perfectStreak: 0, bestPerfectStreak: 0,
       bestDayProfit: 0,
+      // V3 lifetime counters
+      specialtiesSold: 0, sidesSoldLife: 0, preordersOnTime: 0,
+      eventsSeen: 0, zeroWasteDays: 0, raveReviews: 0,
     },
     // prestige scaffolding — never reset by anything in V3
     lifetime: { earned: 0, served: 0, perfects: 0, days: 0, maxLevel: 1 },

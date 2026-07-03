@@ -44,6 +44,11 @@ export const DayEndScene = {
       goalHit: stats.goalHit, goalDesc: stats.goalDesc, goalReward: stats.goalReward,
     };
     state.carriedRestockSpend = 0;
+    // lifetime counters the milestones watch
+    if (stats.event) state.stats.eventsSeen = (state.stats.eventsSeen | 0) + 1;
+    if (wasteN === 0 && stats.day > 3) {
+      state.stats.zeroWasteDays = (state.stats.zeroWasteDays | 0) + 1;
+    }
     const sideRevTotal = Object.values(stats.sideRevenue || {}).reduce((a, b) => a + b, 0);
     const dayProfit = stats.sales + stats.tips + stats.bonus + sideRevTotal - restockSpend
       - (stats.emergency || 0);

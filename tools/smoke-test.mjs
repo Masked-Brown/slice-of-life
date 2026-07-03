@@ -432,6 +432,96 @@ console.log('scenario C: second oven + automation');
   await page.close();
 }
 
+// =====================================================================
+// Scenario D — V2 save migration in the real game + level-up card +
+// telemetry export (the playtester handoff path)
+// =====================================================================
+console.log('scenario D: V2 migration + level-up + telemetry export');
+{
+  // a genuine V2-shaped save: no xp/level/batches/lifetime/meta anywhere
+  const v2save = {
+    version: 2, phase: 'shop', day: 9, money: 210,
+    recentRatings: [4, 4, 5, 4, 4, 3, 4, 5],
+    upgrades: { oven: 1, ladle: 1, shaker: 0, tongs: 1, decor: 1, supply: 1 },
+    toppings: ['pepperoni', 'mushroom', 'onion', 'olive', 'ham'],
+    sizeL: true,
+    boosts: { prep: 0, ad: 0 }, tutorialDone: true, muted: true,
+    stats: { lifetimeServed: 61, lifetimeEarned: 704, lifetimePerfects: 9,
+      perfectStreak: 1, bestPerfectStreak: 3, bestDayProfit: 88 },
+    stock: { pepperoni: 18, mushroom: 9, onion: 12, olive: 6, ham: 4 },
+    carriedRestockSpend: 3.1,
+    milestonesDone: { serve25: true, earn250: true },
+    nextDay: null, lastDay: null,
+  };
+
+  const page = await newPage();
+  await page.addInitScript(s => localStorage.setItem('slice-of-life-save-v1', JSON.stringify(s)), v2save);
+  await page.goto(`http://127.0.0.1:${PORT}/`);
+  await page.click('#btn-continue');
+
+  check('V2 save opens straight into the shop', await waitFor(page, () =>
+    document.querySelector('.shop-panel') !== null));
+  const mig = await page.evaluate(() => {
+    const s = window.__game.state;
+    return {
+      version: s.version, day: s.day, money: s.money, level: s.level, xp: s.xp,
+      served: s.stats.lifetimeServed, lifetimeDays: s.lifetime.days,
+      metaMult: s.meta.mult,
+      basics: s.stock.dough > 0 && s.stock.sauce > 0 && s.stock.cheese > 0,
+      batchesSync: Object.keys(s.stock).every(k =>
+        (s.stockAges[k] || []).reduce((a, b) => a + b.n, 0) === s.stock[k]),
+      hamLevel: s.level, dials: !!s.dials,
+    };
+  });
+  check('progress survives (day/money/stats)', mig.version === 3 && mig.day === 9
+    && mig.money === 210 && mig.served === 61);
+  check('XP/level backfilled over owned content', mig.level >= 10 && mig.xp > 0,
+    `(level ${mig.level})`);
+  check('lifetime + meta scaffolding present', mig.lifetimeDays === 8 && mig.metaMult === 1);
+  check('basics granted, batches in sync', mig.basics && mig.batchesSync);
+  check('locked V3 content shows level chips', await page.evaluate(() => {
+    document.querySelector('.shop-tab[data-tab="menu"]').click();
+    return [...document.querySelectorAll('.sc-lock')].length > 0;
+  }));
+
+  // open the day, then force a level-up mid-service: card must appear & pause
+  await page.click('#btn-open-day');
+  await waitFor(page, () => !document.getElementById('ui-dayboard').classList.contains('hidden'));
+  await page.click('#db-start');
+  await waitFor(page, () => window.__game._svc.dayStarted);
+  await page.evaluate(() => {
+    // enough XP to cross a level, granted through the real award path
+    window.__game._svc.onXP(500, 640, 300);
+  });
+  check('level-up reveal card fires', await waitFor(page, () =>
+    !document.getElementById('ui-levelup').classList.contains('hidden'), 5000));
+  check('the floor pauses for the moment', await page.evaluate(() =>
+    window.__game._svc.paused === true));
+  await page.click('#lu-continue');
+  check('play resumes after the reveal', await waitFor(page, () =>
+    window.__game._svc.paused === false, 3000));
+
+  // telemetry: events recorded, panel opens, export downloads a JSON file
+  check('telemetry recorded events', await page.evaluate(async () => {
+    const { Telemetry } = await import('/src/telemetry.js');
+    return Telemetry.all().length > 0;
+  }));
+  await page.keyboard.press('Control+Shift+D');
+  check('dev panel opens on Ctrl+Shift+D', await page.evaluate(() =>
+    [...document.querySelectorAll('div')].some(d =>
+      d.textContent.includes('TELEMETRY (local only)') && !d.hidden)));
+  const dl = page.waitForEvent('download', { timeout: 5000 }).catch(() => null);
+  await page.evaluate(() => {
+    [...document.querySelectorAll('button')]
+      .find(b => b.textContent === 'EXPORT JSON').click();
+  });
+  const download = await dl;
+  check('EXPORT JSON downloads a telemetry file', download !== null
+    && /slice-of-life-telemetry-.*\.json/.test(download.suggestedFilename()));
+
+  await page.close();
+}
+
 // real console errors fail the run (audio autoplay warnings are not errors)
 check('no console/page errors', errors.length === 0, '\n    ' + errors.join('\n    '));
 

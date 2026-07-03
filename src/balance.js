@@ -33,7 +33,7 @@ export const BAL = {
     GAP_BASE_MIN: 15,                         // arrival gap range (s), day 1
     GAP_BASE_MAX: 26,
     GAP_DAY_DECAY: 0.93,                      // gap range × this per day
-    GAP_FLOOR: 7,                             // gaps never shrink below (s)
+    GAP_FLOOR: 8,                             // gaps never shrink below (s)
     RUSH_CHANCE: 0.18,                        // chance an arrival comes hot on the heels
     RUSH_GAP: 3,                              // (s) gap when rushed
     FIRST_ARRIVAL: 1.2,                       // (s) into the day
@@ -74,9 +74,10 @@ export const BAL = {
   },
 
   // ---- Patience ------------------------------------------------------------
+  // (V3: a touch kinder than V2 — days are busier and orders run deeper)
   PATIENCE: {
-    FRONT_SECONDS: 90,           // full drain time at the front of the queue
-    QUEUE_SECONDS: 140,          // full drain time while waiting behind
+    FRONT_SECONDS: 100,          // full drain time at the front of the queue
+    QUEUE_SECONDS: 160,          // full drain time while waiting behind
     DECOR_BONUS: 0.15,           // +15% patience per decor tier
     WARN_FRAC: 0.45,             // below: checking-watch face
     ANGRY_FRAC: 0.2,             // below: steaming face
@@ -318,10 +319,10 @@ export const BAL = {
 
   // ---- Customer archetypes (V3 — the queue reads at a glance) -----------------
   ARCHETYPES: {
-    impatient: { chance: 0.13, drain: 1.4 },              // taps a foot, drains fast
+    impatient: { chance: 0.11, drain: 1.3 },              // taps a foot, drains fast
     easygoing: { chance: 0.13, drain: 0.62 },             // coffee in hand, all day
     tourist:   { chance: 0.10, payMult: 1.1, specialtyBias: 0.5 },  // camera, loves the menu
-    vip:       { chance: 0.06, drain: 1.55, payMult: 1.7, tipMult: 2.2, ratingWeight: 2 },
+    vip:       { chance: 0.06, drain: 1.45, payMult: 1.7, tipMult: 2.2, ratingWeight: 2 },
   },
 
   // ---- Events — announced on the board, never a surprise ----------------------
@@ -421,10 +422,10 @@ export const BAL = {
     GOAL: 14, MILESTONE: 20, EVENT: 18, PREORDER: 8, CRITIC_A: 30,
     // XP needed to go from level n to n+1 (index 0 = L1→L2). 29 steps → L30.
     CURVE: [35, 55, 70, 85, 95, 105, 115, 125, 135, 145,
-            155, 160, 165, 170, 175, 180, 185, 190, 195, 200,
-            205, 210, 215, 220, 225, 230, 235, 240, 245],
-    LEVEL_CASH_BASE: 6,             // level-up cash bonus = base + per × level
-    LEVEL_CASH_PER: 2,
+            150, 155, 160, 165, 170, 175, 180, 185, 190, 195,
+            195, 200, 200, 205, 205, 210, 210, 215, 215],
+    LEVEL_CASH_BASE: 3,             // level-up cash bonus = base + per × level
+    LEVEL_CASH_PER: 1,              // (kept small — bonuses stay a side dish)
   },
 
   // ---- The unlock table — V3's drip-feed engine -----------------------------
@@ -519,7 +520,7 @@ export const BAL = {
   STOCK: {
     START: 24,                   // starting stock per starter topping
     START_BASICS: 40,            // starting dough/sauce/cheese units
-    NEW_TOPPING_INCLUDED: 20,    // stock included when a topping is unlocked
+    NEW_TOPPING_INCLUDED: 24,    // stock included when a topping is unlocked
     LOW_AT: 6,                   // low-stock warning threshold (amber)
     LOW_AT_BASICS: 8,            // basics warn a little earlier
     BUY_AMOUNTS: [5, 20],        // restock button quantities (toppings)
@@ -585,6 +586,21 @@ export const BAL = {
     { id: 'toppings8',   label: 'Stock 8 topping bins',       stat: 'toppingsOwned', target: 8,    reward: 110 },
     { id: 'allToppings', label: 'Unlock every topping',       stat: 'toppingsOwned', target: 18,   reward: 420 },
     { id: 'profit100',   label: 'A £100-profit day',          stat: 'bestDayProfit', target: 100,  reward: 50 },
+    // V3: the new systems earn their own drumbeats
+    { id: 'level5',      label: 'Reach Chef Level 5',         stat: 'level',         target: 5,    reward: 15 },
+    { id: 'level10',     label: 'Reach Chef Level 10',        stat: 'level',         target: 10,   reward: 30 },
+    { id: 'level20',     label: 'Reach Chef Level 20',        stat: 'level',         target: 20,   reward: 80 },
+    { id: 'level30',     label: 'Reach Chef Level 30',        stat: 'level',         target: 30,   reward: 250, ratingBump: 1 },
+    { id: 'spec25',      label: 'Sell 25 specialties',        stat: 'specialtiesSold', target: 25, reward: 70 },
+    { id: 'spec100',     label: 'Sell 100 specialties',       stat: 'specialtiesSold', target: 100, reward: 220 },
+    { id: 'sides100',    label: 'Serve 100 sides',            stat: 'sidesSoldLife', target: 100,  reward: 150 },
+    { id: 'preorder10',  label: '10 pre-orders on time',      stat: 'preordersOnTime', target: 10, reward: 80 },
+    { id: 'events10',    label: 'See 10 event days through',  stat: 'eventsSeen',    target: 10,   reward: 90 },
+    { id: 'zeroWaste3',  label: '3 zero-waste days',          stat: 'zeroWasteDays', target: 3,    reward: 70 },
+    { id: 'rave1',       label: 'Earn a rave review',         stat: 'raveReviews',   target: 1,    reward: 60,  ratingBump: 1 },
+    { id: 'rave3',       label: 'Earn 3 rave reviews',        stat: 'raveReviews',   target: 3,    reward: 160 },
+    { id: 'devoted',     label: 'A regular reaches top loyalty', stat: 'loyaltyTop', target: 3,    reward: 120 },
+    { id: 'mastery3',    label: 'Earn 3 mastery stars',       stat: 'masteryStarsTotal', target: 3, reward: 140 },
   ],
   MILESTONE_MIN_RATINGS: 12,     // star milestones need this many rated customers
 
@@ -597,6 +613,9 @@ export const BAL = {
     { id: 'perfect2', desc: 'Serve 2 perfect pizzas',                     short: '2 perfects',       reward: 14, target: 2 },
     { id: 'useAll',   desc: 'Use every topping at least once',            short: 'Use every topping', reward: 12, needs: 'manyToppings' },
     { id: 'fast5',    desc: 'Serve 5 orders under par time',              short: '5 fast orders',    reward: 12, target: 5 },
+    { id: 'sides3',   desc: 'Sell 3 sides',                               short: '3 sides',          reward: 12, target: 3, needs: 'sides' },
+    { id: 'spec2',    desc: 'Serve 2 specialty pizzas',                   short: '2 specialties',    reward: 14, target: 2, needs: 'recipes' },
+    { id: 'stamps2',  desc: 'Earn 2 loyalty stamps',                      short: '2 loyalty stamps', reward: 13, target: 2, needs: 'loyalty' },
   ],
   DAILY_GOAL_MANY_TOPPINGS: 4,   // 'useAll' offered once you own this many
 

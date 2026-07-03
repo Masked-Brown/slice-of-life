@@ -121,9 +121,11 @@ console.log('daily goals');
   }
   check('locked goals never offered, specials always owned', ok);
   s.sizeL = true; s.toppings = ['pepperoni', 'mushroom', 'onion', 'olive'];
+  const feasibleN = BAL.DAILY_GOALS.filter(g =>
+    !['sides', 'recipes', 'loyalty'].includes(g.needs)).length;
   const seen = new Set();
-  for (let d = 1; d <= 12; d++) { s.day = d; s.nextDay = null; seen.add(ensureNextDay(s).goal.id); }
-  check('goal rotation covers the full pool', seen.size === BAL.DAILY_GOALS.length, `(saw ${seen.size})`);
+  for (let d = 1; d <= feasibleN * 2; d++) { s.day = d; s.nextDay = null; seen.add(ensureNextDay(s).goal.id); }
+  check('goal rotation covers the feasible pool', seen.size === feasibleN, `(saw ${seen.size}/${feasibleN})`);
 
   // all-day goals only settle when the day is over
   const svc = { served: 3, lost: 0, totalCustomers: 6, sats: [95, 95, 95], largeSold: 0,

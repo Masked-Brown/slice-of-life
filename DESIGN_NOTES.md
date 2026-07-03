@@ -304,3 +304,28 @@ instrument; results table lives in the final report.
   computation point. Second oven's pass holds one pizza (readability
   over throughput). Seasons chosen at 36-day loop so a level-30 run
   (~day 25–35) sees ~3 seasons — enough to teach the loop cycles.
+- **2026-07-03 (tuning pass, 30-day sim × 8 runs)** Final numbers:
+  1.23 purchases/day, bonus share 20.9% (sim is a greedy completionist
+  — real players land lower), waste 9.8% of restock spend, L10 at day
+  ~8 / L20 at ~17.5 / L30 at ~28.6, premium grades net +£124/run once
+  volume justifies them. Changes made to hit this: level-up cash
+  trimmed (3+1×level), level milestones trimmed (they double-dip with
+  level cash), patience +~15% over V2 (V3 days are busier and orders
+  deeper: FRONT 90→100s, QUEUE 140→160s), arrival gap floor 7→8s,
+  impatient/VIP drains 1.4/1.55→1.3/1.45, new-topping included stock
+  20→24. Known near-misses, first things to tune with playtest data:
+  (1) stockout orders ~3.8/day vs the 1–3 target mid-game — forecast
+  UI could surface "expected use" per ingredient; (2) bonus share
+  20.9% vs ≤20 — next lever is milestone rewards, not goals; (3)
+  walk-outs ~1.7/day late game under a non-prioritizing player model —
+  watch real players before touching patience again.
+- **Automation honesty note.** The auto-dispenser reads the ticket's
+  sauce *variant* (that's the bought relief) but pours to its dial,
+  not the ticket's band — the amount decision stays with the player
+  ("dial light, top up" is the intended strategy). The proofer removes
+  size misreads entirely; that error simply stops existing, which is
+  the point of buying it.
+- **Second oven + groups.** Group tickets deliberately don't overlap
+  (the leader stays at the counter) — two interleaved multi-pizza
+  orders exceeded the readable complexity budget. The dual-slot flow
+  is for singles, which is where the queue pressure actually lives.
