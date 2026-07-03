@@ -11,6 +11,7 @@ import { currentRating, pushRating, saveGame, gbp, refundStock, addStock } from 
 import { ensureNextDay, checkMilestones, goalProgress } from '../goals.js';
 import { awardXP, celebrateLevelUp, xpFrac } from '../progress.js';
 import { syncSeason, seasonActive, seasonDaysLeft } from '../seasons.js';
+import { Music } from '../music.js';
 import { Telemetry } from '../telemetry.js';
 import { Orders } from '../stations/order.js';
 import { Build, PIZZA_POS, TRAY, NEXT_BTN, BINS_Y } from '../stations/build.js';
@@ -151,6 +152,9 @@ export const ServiceScene = {
     svc.dayStarted = true;
     g.dom.dayboard.classList.add('hidden');
     Telemetry.log('day_start', { customers: svc.totalCustomers, money: Math.round(state.money) });
+    // the soundtrack reads the room
+    const moods = { critic: 'tense', inspector: 'tense', rush: 'rush', festival: 'festive' };
+    Music.setMood(svc.event ? (moods[svc.event.id] || 'cozy') : 'cozy');
     Juice.stamp(640, 300, `DAY ${state.day} — OPEN!`, { color: '#9fe07c', size: 52 });
     Sfx.bell();
   },
@@ -279,6 +283,7 @@ export const ServiceScene = {
     g.dom.dayboard.innerHTML = '';
     g.dom.preorders.classList.add('hidden');
     g.dom.preorders.innerHTML = '';
+    Music.setMood('cozy');
     Juice.clear();
     svc = null;
   },
@@ -545,6 +550,15 @@ export const ServiceScene = {
     Sides.update(svc, dt);
     Oven.update(svc, dt);
     this._checkPreorders();
+
+    // a pre-order at the counter taps their watch as the grace runs out
+    const front = Orders.front(svc);
+    if (front && front.preorder && !front._graceWarned
+        && svc.elapsed - front.frontAt > BAL.PREORDER.GRACE - 6) {
+      front._graceWarned = true;
+      Sfx.alarm();
+      Juice.floatText(front.x, front.y - 112, 'They’re waiting!', { color: '#ff8a70', size: 17 });
+    }
 
     this._updateHUD();
     this._updateCursor(g);
@@ -831,34 +845,75 @@ export const ServiceScene = {
 
     ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE;
 
-    // window onto the street (daylight, rooftops)
+    // window onto the street: daylight, rooftops, passers-by, the season
+    const winSeason = seasonActive(svc.state);
     ctx.save();
     ctx.fillStyle = '#9c6b3c';
     rr(ctx, 96, 26, 168, 104, 10); ctx.fill(); ctx.stroke();
     rr(ctx, 106, 36, 148, 84, 6);
     ctx.save();
     ctx.clip();
+    const skyCols = {
+      spring: ['#b8dcec', '#e8f2f0'], summer: ['#9ed3f0', '#e0f2fa'],
+      spooky: ['#8f86b8', '#d9c2b0'], winter: ['#c2ccdc', '#eef2f7'],
+    }[winSeason] || ['#aed7ec', '#dceef7'];
     const sky = ctx.createLinearGradient(0, 36, 0, 120);
-    sky.addColorStop(0, '#aed7ec');
-    sky.addColorStop(1, '#dceef7');
+    sky.addColorStop(0, skyCols[0]);
+    sky.addColorStop(1, skyCols[1]);
     ctx.fillStyle = sky;
     ctx.fillRect(106, 36, 148, 84);
     // sun + drifting cloud
-    ctx.fillStyle = '#ffe9a8';
-    ctx.beginPath(); ctx.arc(232, 54, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = winSeason === 'spooky' ? '#f2e3c0' : '#ffe9a8';
+    ctx.beginPath(); ctx.arc(232, 54, winSeason === 'summer' ? 15 : 12, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     const cx = 120 + ((svc.elapsed * 3) % 180);
     for (const [dx, r] of [[-14, 8], [0, 11], [14, 8]]) {
       ctx.beginPath(); ctx.arc(cx + dx, 62, r, 0, Math.PI * 2); ctx.fill();
     }
     // rooftop silhouettes
-    ctx.fillStyle = '#b98a64';
+    ctx.fillStyle = winSeason === 'winter' ? '#c8ccd8' : '#b98a64';
     ctx.beginPath();
     ctx.moveTo(106, 120);
     ctx.lineTo(106, 96); ctx.lineTo(130, 84); ctx.lineTo(154, 96);
     ctx.lineTo(154, 104); ctx.lineTo(176, 104); ctx.lineTo(176, 88);
     ctx.lineTo(204, 76); ctx.lineTo(232, 88); ctx.lineTo(232, 120);
     ctx.closePath(); ctx.fill();
+    // street life: little silhouettes stroll past on offset cycles
+    for (const [period, phase, dir, tone] of [[17, 0, 1, 0.55], [23, 9, -1, 0.4]]) {
+      const k = ((svc.elapsed + phase) % period) / 4.4;
+      if (k < 1) {
+        const wx = dir > 0 ? 100 + k * 160 : 260 - k * 160;
+        const bobW = Math.sin(svc.elapsed * 9) * 1.5;
+        ctx.fillStyle = `rgba(74,52,38,${tone})`;
+        ctx.beginPath(); ctx.arc(wx, 102 + bobW, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(wx - 5, 120); ctx.quadraticCurveTo(wx, 104 + bobW, wx + 5, 120);
+        ctx.closePath(); ctx.fill();
+      }
+    }
+    // seasonal weather in the glass: petals / snow / a bat
+    if (winSeason === 'spring' || winSeason === 'winter') {
+      ctx.fillStyle = winSeason === 'spring' ? 'rgba(240,170,200,0.8)' : 'rgba(255,255,255,0.9)';
+      for (let i = 0; i < 7; i++) {
+        const fx = 112 + ((i * 53.7 + svc.elapsed * (winSeason === 'spring' ? 9 : 6)) % 140);
+        const fy = 40 + ((i * 31.3 + svc.elapsed * (12 + i)) % 78);
+        ctx.beginPath(); ctx.arc(fx, fy, winSeason === 'spring' ? 2.2 : 1.8, 0, Math.PI * 2); ctx.fill();
+      }
+    } else if (winSeason === 'spooky') {
+      const bk = (svc.elapsed % 11) / 5;
+      if (bk < 1) {
+        const bx = 110 + bk * 140, by = 52 + Math.sin(bk * 9) * 8;
+        const flap = Math.sin(svc.elapsed * 16) * 4;
+        ctx.fillStyle = 'rgba(40,30,50,0.8)';
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.quadraticCurveTo(bx - 7, by - 5 - flap, bx - 12, by);
+        ctx.quadraticCurveTo(bx - 7, by + 1, bx, by + 2);
+        ctx.quadraticCurveTo(bx + 7, by + 1, bx + 12, by);
+        ctx.quadraticCurveTo(bx + 7, by - 5 - flap, bx, by);
+        ctx.fill();
+      }
+    }
     ctx.restore();
     rr(ctx, 106, 36, 148, 84, 6); ctx.stroke();
     // crossbars
@@ -867,8 +922,24 @@ export const ServiceScene = {
     ctx.fillRect(106, 74, 148, 5);
     ctx.restore();
 
-    // hanging menu board
+    // warm pool of light spilling from the window onto the counter edge
     ctx.save();
+    ctx.globalAlpha = 0.10;
+    ctx.fillStyle = '#ffdf9e';
+    ctx.beginPath();
+    ctx.moveTo(106, 130);
+    ctx.lineTo(254, 130);
+    ctx.lineTo(300, 176);
+    ctx.lineTo(60, 176);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE;
+
+    // hanging menu board (swings a breath on its strings)
+    ctx.save();
+    ctx.translate(450, 0);
+    ctx.rotate(Math.sin(svc.elapsed * 0.9) * 0.012);
+    ctx.translate(-450, 0);
     ctx.strokeStyle = '#8a6f4f'; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.moveTo(396, 0); ctx.lineTo(404, 26); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(504, 0); ctx.lineTo(496, 26); ctx.stroke();

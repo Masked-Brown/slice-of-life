@@ -209,6 +209,34 @@ html, body {
   width: 60%;
 }
 
+/* ---- audio settings popover -------------------------------------------- */
+#ui-audio {
+  position: absolute;
+  top: 62px;
+  right: 12px;
+  z-index: 20;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: auto;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.3);
+  animation: pop-in 0.25s cubic-bezier(0.34, 1.7, 0.64, 1) backwards;
+}
+.au-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 900;
+  font-size: 13px;
+  color: var(--ink);
+}
+.au-row span { width: 48px; }
+.au-row input[type="range"] { width: 130px; accent-color: var(--terracotta); }
+
 /* ---- order ticket ------------------------------------------------------- */
 #ui-ticket {
   position: absolute;

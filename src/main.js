@@ -6,6 +6,7 @@
 import { BAL } from './balance.js';
 import { Juice } from './juice.js';
 import { Sfx } from './audio.js';
+import { Music } from './music.js';
 import { Telemetry } from './telemetry.js';
 import { newGame, loadGame, saveGame, hasSave } from './state.js';
 import { TitleScene } from './scenes/title.js';
@@ -68,6 +69,9 @@ const game = {
 
   applyMute() {
     Sfx.setMuted(this.state.muted);
+    Music.setMuted(this.state.muted);
+    Sfx.setVolume(this.state.volumes ? this.state.volumes.sfx : 1);
+    Music.setVolume(this.state.volumes ? this.state.volumes.music : 0.7);
     const icon = this.state.muted ? '🔇' : '🔊';
     this.dom.btnMute.textContent = icon;
     this.dom.btnMuteTitle.textContent = icon;
@@ -120,11 +124,34 @@ window.addEventListener('pointerup', e => {
 });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-// audio unlocks on the first user gesture
+// audio unlocks on the first user gesture; the music fades in with it
 window.addEventListener('pointerdown', () => {
   Sfx.init();
-  Sfx.setMuted(game.state.muted);
+  game.applyMute();
+  Music.start();
 }, { once: true });
+
+// audio settings popover: two sliders, saved with the game
+const audioPanel = $('ui-audio');
+$('btn-audio').addEventListener('click', () => {
+  Sfx.tick();
+  audioPanel.classList.toggle('hidden');
+  if (!audioPanel.classList.contains('hidden')) {
+    $('vol-music').value = Math.round((game.state.volumes.music ?? 0.7) * 100);
+    $('vol-sfx').value = Math.round((game.state.volumes.sfx ?? 1) * 100);
+  }
+});
+$('vol-music').addEventListener('input', e => {
+  game.state.volumes.music = Number(e.target.value) / 100;
+  Music.setVolume(game.state.volumes.music);
+  if (hasSave()) saveGame(game.state);
+});
+$('vol-sfx').addEventListener('input', e => {
+  game.state.volumes.sfx = Number(e.target.value) / 100;
+  Sfx.setVolume(game.state.volumes.sfx);
+  Sfx.tick();
+  if (hasSave()) saveGame(game.state);
+});
 
 // soft hover tick on every enabled DOM button
 let lastHoverBtn = null;
@@ -146,6 +173,7 @@ function frame(now) {
   if (dt > 0.05) dt = 0.05;          // clamp after tab-switch etc.
 
   Juice.update(dt);                   // handles its own slow-mo timing
+  Music.update();                     // schedules the next few beats
   const sdt = dt * Juice.timeScale;
   if (game.scene) game.scene.update(game, sdt);
 

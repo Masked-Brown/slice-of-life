@@ -28,6 +28,12 @@ function ensure() {
 const vary = f => f * (0.95 + Math.random() * 0.1);
 const now = () => ctx.currentTime;
 
+// the music module shares this context (one clock, one destination)
+export function getAudioContext() {
+  ensure();
+  return ctx;
+}
+
 // One-shot oscillator blip: pitch glide f0→f1, quick attack, decay over dur
 function blip({ type = 'sine', f0 = 440, f1 = null, dur = 0.1, vol = 0.1, delay = 0, noVary = false }) {
   if (!ctx || muted) return;
@@ -71,16 +77,24 @@ function startLoop(build) {
   return build();
 }
 
+let sfxVolume = 1;
+
 export const Sfx = {
   init() { ensure(); },
   get ready() { return !!ctx; },
 
   setMuted(m) {
     muted = m;
-    if (master) master.gain.value = m ? 0 : MASTER_VOL;
+    if (master) master.gain.value = m ? 0 : MASTER_VOL * sfxVolume;
     if (m) { this.sauceStop(); this.ovenStop(); }
   },
   get muted() { return muted; },
+
+  setVolume(v) {
+    sfxVolume = Math.max(0, Math.min(1, v));
+    if (master && !muted) master.gain.value = MASTER_VOL * sfxVolume;
+  },
+  get volume() { return sfxVolume; },
 
   // ---- UI ------------------------------------------------------------
   tick() { blip({ type: 'sine', f0: 1800, dur: 0.025, vol: 0.035 }); },
