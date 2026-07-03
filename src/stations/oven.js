@@ -88,6 +88,7 @@ export const Oven = {
     Sfx.steamHiss();
     const tier = svc.state.upgrades.oven;
     pz.bakeZone = this.zoneOf(ov.prog, tier);
+    pz.zonesAtPull = this.zones(tier);        // "extra well-done" reads the depth
     Juice.tween({ target: ov, to: { door: 1 }, dur: 0.16, ease: Ease.outCubic });
     Juice.steam(pz.x, pz.y - 20, 6);
     if (pz.bakeZone === 'burnt') {

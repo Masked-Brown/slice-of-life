@@ -7,8 +7,10 @@
 import { BAL, TOPPING_ORDER } from './balance.js';
 import { pick } from './juice.js';
 import { currentRating, pushRating } from './state.js';
+import { unlocked } from './progress.js';
+import { Orders } from './stations/order.js';
 
-// ---- next-day plan (specials + daily goal) ------------------------------
+// ---- next-day plan (specials + daily goal + pre-order offers) --------------
 export function ensureNextDay(state) {
   if (state.nextDay && state.nextDay.day === state.day) return state.nextDay;
 
@@ -28,7 +30,20 @@ export function ensureNextDay(state) {
     (g.needs !== 'manyToppings' || state.toppings.length >= BAL.DAILY_GOAL_MANY_TOPPINGS));
   const goal = { ...feasible[(state.day - 1) % feasible.length] };
 
-  state.nextDay = { day: state.day, specials, goal };
+  // phone pre-order offers: known tickets, fixed due points, player's call.
+  // Rolled here (the evening before) so the restock screen can see them too.
+  const slots = ['preorder1', 'preorder2', 'preorder3']
+    .filter(id => unlocked(state, 'preorder', id)).length;
+  const preorders = [];
+  for (let i = 0; i < slots; i++) {
+    if (Math.random() < BAL.PREORDER.OFFER_CHANCE) {
+      const ticket = Orders.makeTicket(state, specials);
+      ticket.preorder = true;
+      preorders.push({ ticket, dueAfter: BAL.PREORDER.DUE_AFTER[i], accepted: false });
+    }
+  }
+
+  state.nextDay = { day: state.day, specials, goal, preorders };
   return state.nextDay;
 }
 

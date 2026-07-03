@@ -188,14 +188,14 @@ export const Build = {
     return svc.stage === 'sauce' ? pz.sauceCoverage : Score.cheesePct(pz);
   },
 
-  _inTicketBand(bandName, pct) {
-    const [lo, hi] = BAL.SCORE.BANDS[bandName];
+  _inTicketBand(band, pct) {
+    const [lo, hi] = Array.isArray(band) ? band : BAL.SCORE.BANDS[band];
     return pct >= lo && pct <= hi;
   },
 
   // the tick the moment the needle enters the ticket's band
-  _bandFeedback(svc, bandName, pct) {
-    const inBand = this._inTicketBand(bandName, pct);
+  _bandFeedback(svc, band, pct) {
+    const inBand = this._inTicketBand(band, pct);
     if (inBand && !svc._wasInBand) Sfx.bandTick();
     svc._wasInBand = inBand;
   },
@@ -204,7 +204,7 @@ export const Build = {
     const pz = svc.pizza;
     const P = BAL.POUR;
     const tier = svc.state.upgrades.ladle;
-    const band = svc.ticket.sauce;
+    const band = Score.bandOf(svc.ticket, 'sauce');
     const inBand = this._inTicketBand(band, svc._pourCov);
     const rate = P.SAUCE_RATE[tier] * (inBand ? P.IN_BAND_SLOW[tier] : 1);
     svc._pourCov = clamp(svc._pourCov + rate * 100 * dt, 0, 100);
@@ -266,7 +266,7 @@ export const Build = {
     const pz = svc.pizza;
     const P = BAL.POUR;
     const tier = svc.state.upgrades.shaker;
-    const band = svc.ticket.cheese;
+    const band = Score.bandOf(svc.ticket, 'cheese');
     const pct = Score.cheesePct(pz);
     const inBand = this._inTicketBand(band, pct);
     const rate = P.CHEESE_RATE[tier] * (inBand ? P.IN_BAND_SLOW[tier] : 1);
@@ -560,9 +560,9 @@ export const Build = {
     if (svc.stage === 'sauce') {
       // wrong variant sinks the station no matter how neat the pour
       if (t.sauceType && pz.sauceType && pz.sauceType !== t.sauceType) return 'off';
-      return Score.amountGrade(pz.sauceCoverage, t.sauce);
+      return Score.amountGrade(pz.sauceCoverage, Score.bandOf(t, 'sauce'));
     }
-    if (svc.stage === 'cheese') return Score.amountGrade(Score.cheesePct(pz), t.cheese);
+    if (svc.stage === 'cheese') return Score.amountGrade(Score.cheesePct(pz), Score.bandOf(t, 'cheese'));
     if (svc.stage === 'toppings') return Score.toppingsResult(pz, t).grade;
     return 'good';
   },
@@ -622,6 +622,28 @@ export const Build = {
     // band gauge: how full vs the ticket's band (sauce & cheese stages)
     if (pz && (svc.stage === 'sauce' || svc.stage === 'cheese') && svc.ticket) {
       this._renderGauge(svc, ctx, pz);
+    }
+
+    // half-and-half: the divider and side labels during toppings
+    if (pz && svc.ticket && svc.ticket.half && svc.stage === 'toppings' && pz.state === 'counter') {
+      ctx.save();
+      ctx.setLineDash([7, 6]);
+      ctx.strokeStyle = 'rgba(255,251,239,0.85)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(pz.x, pz.y - pz.R - 10);
+      ctx.lineTo(pz.x, pz.y + pz.R + 10);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = '900 17px Trebuchet MS, system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(255,251,239,0.9)';
+      ctx.strokeStyle = OUTLINE; ctx.lineWidth = 4; ctx.lineJoin = 'round';
+      ctx.strokeText('L', pz.x - pz.R - 22, pz.y);
+      ctx.fillText('L', pz.x - pz.R - 22, pz.y);
+      ctx.strokeText('R', pz.x + pz.R + 22, pz.y);
+      ctx.fillText('R', pz.x + pz.R + 22, pz.y);
+      ctx.restore();
     }
 
     // ghost grid hint while holding a piece (tongs t2+)
@@ -816,7 +838,7 @@ export const Build = {
   // Vertical fill gauge left of the pizza: band segments, ticket band in
   // pulsing gold, needle at the current amount. Same language as the oven meter.
   _renderGauge(svc, ctx, pz) {
-    const bandName = svc.stage === 'sauce' ? svc.ticket.sauce : svc.ticket.cheese;
+    const which = svc.stage === 'sauce' ? 'sauce' : 'cheese';
     const pct = this.pourPct(svc);
     const MAX = 115;                        // gauge top (heavy band ends 112)
     const W = 18, H = 170;
@@ -838,7 +860,9 @@ export const Build = {
     }
 
     // ticket band: pulsing gold outline (+ green glow when the needle is inside)
-    const [lo, hi] = BAL.SCORE.BANDS[bandName];
+    // — modifiers ("no cheese", "double sauce") move this band, so the gauge
+    // is always telling the truth about what the ticket wants
+    const [lo, hi] = Score.bandOf(svc.ticket, which);
     const inBand = pct >= lo && pct <= hi;
     ctx.save();
     ctx.globalAlpha = 0.75 + 0.25 * Math.sin(svc.elapsed * 6);

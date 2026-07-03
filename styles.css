@@ -311,6 +311,48 @@ html, body {
   padding: 2.5px 8px;
   margin-top: 7px;
 }
+.tk-mod {
+  text-align: center;
+  font-weight: 900;
+  font-size: 12.5px;
+  color: #a8281a;
+  background: #fbd9d2;
+  border: 2px solid var(--red);
+  border-radius: 999px;
+  padding: 2.5px 8px;
+  margin-bottom: 6px;
+  animation: tut-bob 1.4s ease-in-out infinite;
+}
+.tk-none { background: #fbd9d2 !important; color: #a8281a; }
+.tk-halflbl {
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 1.5px;
+  color: #a3886a;
+  padding: 3px 0 1px;
+}
+.tk-preorder {
+  text-align: center;
+  font-weight: 900;
+  font-size: 12px;
+  color: #4a3a7d;
+  background: #e6def8;
+  border: 2px solid #7a63c9;
+  border-radius: 999px;
+  padding: 2.5px 8px;
+  margin-bottom: 6px;
+}
+.tk-group {
+  text-align: center;
+  font-weight: 900;
+  font-size: 12px;
+  color: #145a5a;
+  background: #d4efec;
+  border: 2px solid #4db6ac;
+  border-radius: 999px;
+  padding: 2.5px 8px;
+  margin-bottom: 6px;
+}
 .tk-row {
   display: flex;
   align-items: center;
@@ -943,3 +985,33 @@ html, body {
 .db-ok { font-weight: 800; font-size: 13.5px; color: #2e7d44; }
 .db-buttons { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; }
 .db-buttons .btn-big { margin-left: auto; }
+.db-po { justify-content: space-between; }
+.db-po-desc { font-size: 13.5px; }
+.db-po-btn { font-size: 12px; padding: 5px 12px; border-radius: 9px; flex: none; }
+.db-po-on { background: var(--green); }
+
+/* ---- pre-order due strip (under the HUD) ----------------------------------- */
+#ui-preorders {
+  position: absolute;
+  top: 62px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-end;
+  pointer-events: none;
+  z-index: 5;
+}
+.po-pill {
+  background: #e6def8;
+  border: 2.5px solid #7a63c9;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-weight: 800;
+  font-size: 12px;
+  color: #4a3a7d;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.2);
+}
+.po-now { background: #fdeec0; border-color: var(--gold); color: #8a5a00; animation: tut-bob 0.9s ease-in-out infinite; }
+.po-done { background: #d7eec8; border-color: var(--green); color: #2e7d44; opacity: 0.85; }
+.po-late { background: #fbd9d2; border-color: var(--red); color: #a8281a; }

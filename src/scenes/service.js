@@ -90,8 +90,11 @@ export const ServiceScene = {
       onBakeDone: () => this._onBakeDone(),
       onOrderDone: res => this._onOrderDone(res),
       onXP: (amount, x, y) => this._onXP(amount, x, y),
+      onGroupNext: c => this._onGroupNext(c),
       advanceStage: () => this._advanceStage(),
     };
+    svc.groupParked = [];
+    svc.preorders = [];
     svc.totalCustomers = 0;
     g._svc = svc;   // debug/testing handle
 
@@ -110,7 +113,11 @@ export const ServiceScene = {
     const g = svc.game, state = svc.state;
     svc.prepLeft = state.boosts.prep ? BAL.BOOSTS.PREP_PIZZAS : 0;
     svc.pending = Orders.generateDay(state);
-    svc.totalCustomers = svc.pending.length;
+    // accepted phone pre-orders join mid-service at their due points
+    svc.preorders = ((state.nextDay && state.nextDay.preorders) || [])
+      .filter(o => o.accepted)
+      .map(o => ({ ...o, injected: false, done: false, late: false }));
+    svc.totalCustomers = svc.pending.length + svc.preorders.length;
     state.boosts = { prep: 0, ad: 0 };
     svc.dayStarted = true;
     g.dom.dayboard.classList.add('hidden');
@@ -142,6 +149,18 @@ export const ServiceScene = {
       ? `<div class="db-warn">⚠ Low on ${flagged.map(k => ING(k).label).join(', ')} — restock in the shop!</div>`
       : `<div class="db-ok">Stock looks good ✓</div>`;
 
+    // phone pre-order offers: accept or wave off, right on the board
+    const offers = plan.preorders || [];
+    const offerRows = offers.map((o, i) => {
+      const t = o.ticket;
+      const desc = `${t.size} · ${t.toppings.map(w => `${w.count}× ${BAL.TOPPINGS[w.type].label}`).join(', ')}`;
+      return `
+        <div class="db-row db-po">
+          <span class="db-po-desc">📞 <b>${desc}</b><span class="db-note"> · due after customer ${o.dueAfter} · +${Math.round(BAL.PREORDER.PREMIUM * 100)}%</span></span>
+          <button class="btn db-po-btn ${o.accepted ? 'db-po-on' : ''}" data-po="${i}">${o.accepted ? '✓ BOOKED' : 'ACCEPT'}</button>
+        </div>`;
+    }).join('');
+
     el.innerHTML = `
       <div class="dayboard">
         <div class="db-head">— DAY ${state.day} —</div>
@@ -153,6 +172,11 @@ export const ServiceScene = {
           <div class="db-label">DAILY GOAL</div>
           <div class="db-row"><b>🎯 ${plan.goal.desc}</b><span class="db-reward">+${gbp(plan.goal.reward)}</span></div>
         </div>
+        ${offers.length ? `
+        <div class="db-section">
+          <div class="db-label">PHONE PRE-ORDERS — known tickets, fixed pickup, late delivery stings</div>
+          ${offerRows}
+        </div>` : ''}
         <div class="db-section">
           <div class="db-label">STOCK CHECK</div>
           <div class="db-chips">${chips}</div>
@@ -164,6 +188,17 @@ export const ServiceScene = {
         </div>
       </div>`;
     el.classList.remove('hidden');
+
+    el.querySelectorAll('.db-po-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const o = offers[Number(btn.dataset.po)];
+        o.accepted = !o.accepted;
+        btn.textContent = o.accepted ? '✓ BOOKED' : 'ACCEPT';
+        btn.classList.toggle('db-po-on', o.accepted);
+        saveGame(state);
+        Sfx.press();
+      });
+    });
 
     el.querySelector('#db-start').addEventListener('click', () => {
       Sfx.press();
@@ -183,6 +218,8 @@ export const ServiceScene = {
     g.dom.tutorial.classList.add('hidden');
     g.dom.dayboard.classList.add('hidden');
     g.dom.dayboard.innerHTML = '';
+    g.dom.preorders.classList.add('hidden');
+    g.dom.preorders.innerHTML = '';
     Juice.clear();
     svc = null;
   },
@@ -198,6 +235,31 @@ export const ServiceScene = {
     Orders.pinTicket(svc, c);
     Sfx.tick();
     this._setTutorial('dough');
+  },
+
+  // group order: next pizza on the same ticket — fresh build, fresh clock
+  _onGroupNext(c) {
+    svc.ticket = c.ticket;
+    c.frontAt = svc.elapsed;       // par time restarts per pizza
+    Build.resetForOrder(svc);
+    svc.stage = 'dough';
+    Orders.pinTicket(svc, c);
+    Sfx.tick();
+  },
+
+  // accepted pre-orders walk in (front of the line) once their due point passes
+  _checkPreorders() {
+    if (!svc.preorders.length || !svc.dayStarted) return;
+    const doneCount = svc.served + svc.lost;
+    for (const o of svc.preorders) {
+      if (o.injected || doneCount < o.dueAfter) continue;
+      o.injected = true;
+      const c = Orders.makePreorderCustomer(svc.state, o);
+      svc.pending.unshift(c);
+      svc.arrivalIn = Math.min(svc.arrivalIn, 0.4);
+      Sfx.alarm();
+      Juice.floatText(640, 116, '📞 Pre-order pickup!', { color: '#c9b6f2', size: 22 });
+    }
   },
 
   _onDoughDown(size) {
@@ -254,6 +316,7 @@ export const ServiceScene = {
     svc.stage = 'idle';
     Build.resetForOrder(svc);
     Sides.clear(svc);
+    svc.groupParked = [];
     this._updateHUD();
   },
 
@@ -348,6 +411,14 @@ export const ServiceScene = {
     }
     svc.held = null;
     Sides.clear(svc);
+    // parked group pizzas hit the floor with their owner gone
+    for (const parked of svc.groupParked) {
+      Juice.killTweensOf(parked);
+      Juice.tween({
+        target: parked, to: { y: 800, rot: 1.4, scale: 0.3 }, dur: 0.5, ease: Ease.inCubic,
+      });
+    }
+    svc.groupParked = [];
     svc.stage = 'idle';
   },
 
@@ -374,6 +445,7 @@ export const ServiceScene = {
     Build.update(svc, dt);
     Sides.update(svc, dt);
     Oven.update(svc, dt);
+    this._checkPreorders();
 
     this._updateHUD();
     this._updateCursor(g);
@@ -400,6 +472,9 @@ export const ServiceScene = {
         gradeUnits: svc.gradeUnits || {},
         sideRevenue: svc.sideRevenue || {},
         sidesSold: svc.sidesSold || 0,
+        preordersTaken: svc.preorders.length,
+        preordersDone: svc.preordersDone || 0,
+        preordersLate: svc.preordersLate || 0,
         xpToday: svc.xpToday,
         goalHit: !!svc.goal.hit,
         goalDesc: svc.goal.desc, goalReward: svc.goal.reward,
@@ -455,6 +530,21 @@ export const ServiceScene = {
     const lvTxt = 'LV ' + s.level;
     if (force || d.hudLevelNum.textContent !== lvTxt) d.hudLevelNum.textContent = lvTxt;
     d.hudXpFill.style.width = Math.round(xpFrac(s) * 100) + '%';
+
+    // pre-order due strip
+    if (svc.preorders.length) {
+      const html = svc.preorders.map(o => {
+        const t = o.ticket;
+        const what = `${t.size} ${t.toppings.map(w => BAL.TOPPINGS[w.type].label).join('/')}`;
+        if (o.done) return `<div class="po-pill ${o.late ? 'po-late' : 'po-done'}">📞 ${what} ${o.late ? '· late' : '✓'}</div>`;
+        if (o.injected) return `<div class="po-pill po-now">📞 ${what} — HERE NOW!</div>`;
+        return `<div class="po-pill">📞 ${what} · after #${o.dueAfter}</div>`;
+      }).join('');
+      if (d.preorders.innerHTML !== html) d.preorders.innerHTML = html;
+      d.preorders.classList.remove('hidden');
+    } else {
+      d.preorders.classList.add('hidden');
+    }
   },
 
   _updateCursor(g) {
@@ -561,6 +651,7 @@ export const ServiceScene = {
     Oven.render(svc, ctx);
     Sides.render(svc, ctx);
     this._renderPass(ctx);
+    for (const parked of svc.groupParked) Build.drawPizza(ctx, parked);
     Build.render(svc, ctx);
     if (svc.stage === 'idle' && svc.customers.length === 0 && svc.pending.length > 0) {
       ctx.save();

@@ -240,6 +240,39 @@ export const BAL = {
   SIDE_SAT: { PERFECT: 3, SLOPPY: -2, MISSING: -5 },
   SIDE_PAY_FLOOR: 0.55,          // side price × (floor + (1-floor) × quality)
 
+  // ---- Order modifiers — small twists that punish autopilot ------------------
+  // Implemented as band/zone overrides; the scoring engine is unchanged.
+  MODIFIER_CHANCE: 0.18,         // chance a plain ticket carries one (once unlocked)
+  MODIFIERS: {
+    nocheese:    { set: 'modsA', label: 'NO cheese',          chip: 'none!',   band: { cheese: [0, 6] } },
+    easysauce:   { set: 'modsA', label: 'easy on the sauce',  chip: 'easy!',   band: { sauce: [10, 32] } },
+    doublesauce: { set: 'modsB', label: 'DOUBLE sauce',       chip: 'double!', band: { sauce: [88, 112] } },
+    extrawell:   { set: 'modsB', label: 'extra well-done',    chip: 'extra!',  bakeDeep: true },
+  },
+  BAKE_DEEP_FRAC: 0.5,           // extra well-done: pull in the deep half of WELL
+
+  // ---- Half-and-half ----------------------------------------------------------
+  HALFHALF_CHANCE: 0.14,         // chance a 2-type ticket splits (once unlocked)
+
+  // ---- Group orders -------------------------------------------------------------
+  GROUP: {
+    CHANCE: 0.10,                // chance a customer brings a group ticket
+    THREE_CHANCE: 0.35,          // …of those, chance it's 3 pizzas (once unlocked)
+    PREMIUM: 0.12,               // group total pays this much extra
+    PATIENCE_MULT: 1.9,          // their patience pool scales to the workload
+  },
+
+  // ---- Phone pre-orders -----------------------------------------------------------
+  PREORDER: {
+    PREMIUM: 0.25,               // pre-orders pay this much extra
+    OFFER_CHANCE: 0.85,          // chance each unlocked slot gets an offer today
+    DUE_AFTER: [3, 6, 9],        // due after this many customers (slot 1/2/3)
+    GRACE: 22,                   // (s) at the counter before lateness stings
+    LATE_SAT_PER_SEC: 0.7,       // satisfaction lost per second past grace
+    LATE_SAT_MAX: 22,            // …capped here
+    PATIENCE_SCALE: 0.85,        // they expected it ready — slightly less patient
+  },
+
   // ---- Basics (dough / sauce base / cheese) — V3 stocked ingredients ------
   // Consumed 1 unit per pizza (flat, any size — forecasting stays "units ≈
   // pizzas"). Never block the build: at 0 stock each use auto-charges an

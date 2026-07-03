@@ -48,7 +48,18 @@ export const Orders = {
           c = this._makeRegular(state, key, r);
         }
       }
-      list.push(c || this._makeCustomer(state, i));
+      c = c || this._makeCustomer(state, i);
+      // group leaders bring one ticket with several pizzas on it
+      if (!c.regular && unlocked(state, 'group', 'group2') && Math.random() < BAL.GROUP.CHANCE) {
+        const n = unlocked(state, 'group', 'group3') && Math.random() < BAL.GROUP.THREE_CHANCE ? 3 : 2;
+        const tickets = [c.ticket];
+        while (tickets.length < n) tickets.push(this._rollTicket(state));
+        tickets.forEach(t => delete t.side);   // enough plates already
+        c.group = { tickets, idx: 0, results: [] };
+        c.ticket = tickets[0];
+        c.drainScale = 1 / BAL.GROUP.PATIENCE_MULT;  // patience scaled to the work
+      }
+      list.push(c);
     }
     return list;
   },
@@ -81,6 +92,25 @@ export const Orders = {
     const t = recipes.length && Math.random() < BAL.RECIPE_CHANCE
       ? this.recipeTicket(state, pick(recipes))
       : this.makeTicket(state, (state.nextDay && state.nextDay.specials) || []);
+    if (!t.specialty) {
+      // half-and-half: a 2-type ticket splits into sides (placement test)
+      if (t.toppings.length >= 2 && unlocked(state, 'halfhalf', 'halfhalf')
+          && Math.random() < BAL.HALFHALF_CHANCE) {
+        t.half = true;
+        t.halves = { L: [], R: [] };
+        t.toppings.forEach((w, i) => t.halves[i % 2 === 0 ? 'L' : 'R'].push(w));
+      }
+      // a modifier — one twist per ticket, from whichever sets are unlocked
+      if (!t.half && Math.random() < BAL.MODIFIER_CHANCE) {
+        const pool = Object.keys(BAL.MODIFIERS).filter(k =>
+          unlocked(state, 'modifier', BAL.MODIFIERS[k].set));
+        if (pool.length) {
+          const key = pick(pool);
+          t.modifier = key;
+          if (BAL.MODIFIERS[key].bakeDeep) t.bake = 'well';
+        }
+      }
+    }
     if (state.sides.length && Math.random() < BAL.SIDE_CHANCE) {
       t.side = pick(state.sides);
     }
@@ -119,6 +149,16 @@ export const Orders = {
       toppings: r.fav.toppings.map(t => ({ ...t })),
       special: false,
     };
+    return c;
+  },
+
+  // a phone pre-order pickup: known ticket, priority entry, less patience
+  makePreorderCustomer(state, offer) {
+    const c = this._makeCustomer(state, 0);
+    c.ticket = offer.ticket;
+    c.preorder = offer;
+    c.drainScale = 1 / BAL.PREORDER.PATIENCE_SCALE;
+    c.colors.hat = true;
     return c;
   },
 
@@ -221,10 +261,11 @@ export const Orders = {
         svc.onNewFront(c);
       }
 
-      // patience drain (front drains faster); frozen during the handoff
+      // patience drain (front drains faster); frozen during the handoff.
+      // drainScale: groups drain slower (big order), pre-orders a touch faster
       if ((c.state === 'front' && svc.stage !== 'handoff') || c.state === 'queued') {
         const secs = (c.state === 'front' ? BAL.PATIENCE.FRONT_SECONDS : BAL.PATIENCE.QUEUE_SECONDS) * pm;
-        c.patience -= dt / secs;
+        c.patience -= (dt / secs) * (c.drainScale || 1);
         if (c.patience <= 0) {
           this._stormOut(svc, c);
         }
@@ -277,32 +318,43 @@ export const Orders = {
   pinTicket(svc, c) {
     const el = svc.game.dom.ticket;
     const t = c.ticket;
-    const tops = t.toppings.map(w =>
-      `<div class="tk-row tk-top">
-         <span class="tk-dot" style="background:${BAL.TOPPINGS[w.type].dot}"></span>
-         <b>${w.count}×</b>&nbsp;${BAL.TOPPINGS[w.type].label}
-       </div>`).join('');
+    const topRow = w => `
+      <div class="tk-row tk-top">
+        <span class="tk-dot" style="background:${BAL.TOPPINGS[w.type].dot}"></span>
+        <b>${w.count}×</b>&nbsp;${BAL.TOPPINGS[w.type].label}
+      </div>`;
+    const tops = t.half && t.halves
+      ? `<div class="tk-halflbl">◐ LEFT</div>${t.halves.L.map(topRow).join('')}
+         <div class="tk-halflbl">RIGHT ◑</div>${t.halves.R.map(topRow).join('')}`
+      : t.toppings.map(topRow).join('');
     const state = svc.state;
+    const mod = t.modifier ? BAL.MODIFIERS[t.modifier] : null;
     const showCrust = state.crusts.length > 1 || (t.crust && t.crust !== 'classic');
     const showVariant = state.sauces.length > 1 || (t.sauceType && t.sauceType !== 'tomato');
+    const sauceTxt = mod && mod.band && mod.band.sauce ? mod.chip : t.sauce;
+    const cheeseTxt = mod && mod.band && mod.band.cheese ? mod.chip : t.cheese;
     const sauceChip = showVariant
-      ? `<span class="tk-chip lv-${t.sauce}"><span class="tk-saucedot" style="background:${BAL.SAUCES[t.sauceType || 'tomato'].color}"></span>${t.sauce} ${BAL.SAUCES[t.sauceType || 'tomato'].label}</span>`
-      : `<span class="tk-chip lv-${t.sauce}">${t.sauce}</span>`;
+      ? `<span class="tk-chip lv-${t.sauce}"><span class="tk-saucedot" style="background:${BAL.SAUCES[t.sauceType || 'tomato'].color}"></span>${sauceTxt} ${BAL.SAUCES[t.sauceType || 'tomato'].label}</span>`
+      : `<span class="tk-chip lv-${t.sauce}">${sauceTxt}</span>`;
     const recipe = t.specialty ? BAL.RECIPES[t.specialty] : null;
+    const group = c.group;
     el.innerHTML = `
       <div class="tk-pin"></div>
-      <div class="tk-head">ORDER <span>#${svc.orderIndex}</span></div>
+      <div class="tk-head">${group ? `GROUP <span>${group.idx + 1}/${group.tickets.length}</span>` : `ORDER <span>#${svc.orderIndex}</span>`}</div>
       ${c.regular ? `<div class="tk-reg">⭐ for ${c.regular.name}</div>` : ''}
+      ${c.preorder ? `<div class="tk-preorder">📞 pre-order · +${Math.round(BAL.PREORDER.PREMIUM * 100)}%</div>` : ''}
+      ${group ? `<div class="tk-group">👨‍👩‍👧 ${group.tickets.length} pizzas · +${Math.round(BAL.GROUP.PREMIUM * 100)}%</div>` : ''}
       ${recipe ? `<div class="tk-recipe">🍕 ${recipe.name} · +${Math.round(recipe.premium * 100)}%</div>` : ''}
       ${t.special ? `<div class="tk-special">★ today's special · +${Math.round(BAL.SPECIALS.PRICE_PREMIUM * 100)}%</div>` : ''}
+      ${mod ? `<div class="tk-mod">❗ ${mod.label}</div>` : ''}
       <div class="tk-row"><span class="tk-lbl">SIZE</span><span class="tk-chip tk-size">${t.size}</span></div>
       ${showCrust ? `<div class="tk-row"><span class="tk-lbl">CRUST</span><span class="tk-chip ck-${t.crust || 'classic'}">${BAL.CRUSTS[t.crust || 'classic'].label.toLowerCase()}</span></div>` : ''}
       <div class="tk-row"><span class="tk-lbl">SAUCE</span>${sauceChip}</div>
-      <div class="tk-row"><span class="tk-lbl">CHEESE</span><span class="tk-chip lv-${t.cheese}">${t.cheese}</span></div>
+      <div class="tk-row"><span class="tk-lbl">CHEESE</span><span class="tk-chip lv-${t.cheese} ${cheeseTxt === 'none!' ? 'tk-none' : ''}">${cheeseTxt}</span></div>
       <div class="tk-sep"></div>
       ${tops}
       <div class="tk-sep"></div>
-      <div class="tk-row"><span class="tk-lbl">BAKE</span><span class="tk-chip bk-${t.bake}">${t.bake === 'well' ? 'well-done' : t.bake}</span></div>
+      <div class="tk-row"><span class="tk-lbl">BAKE</span><span class="tk-chip bk-${t.bake}">${mod && mod.bakeDeep ? 'EXTRA well' : t.bake === 'well' ? 'well-done' : t.bake}</span></div>
       ${t.side ? `<div class="tk-sideorder">+ ${BAL.SIDES[t.side].name}</div>` : ''}`;
     el.classList.remove('hidden', 'ticket-out');
     el.classList.remove('ticket-in');

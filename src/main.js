@@ -45,6 +45,7 @@ const game = {
     shop: $('ui-shop'),
     tutorial: $('ui-tutorial'),
     levelup: $('ui-levelup'),
+    preorders: $('ui-preorders'),
     hudMoney: $('hud-money'),
     hudDay: $('hud-day'),
     hudProgress: $('hud-progress'),

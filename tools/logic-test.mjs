@@ -324,6 +324,76 @@ console.log('specialties & sides & decor');
   check('golden bell adds tips at L30', (() => { const g2 = newGame(); g2.level = 30; return tipMult(g2) > 1; })());
 }
 
+// ---- 8e. advanced orders: modifiers, half-and-half, groups, pre-orders ----------
+console.log('advanced orders');
+{
+  const s = newGame();
+  s.level = 30;
+
+  // modifier bands override the named band
+  const noCheeseT = { size: 'M', sauce: 'normal', cheese: 'heavy', bake: 'normal', modifier: 'nocheese', toppings: [] };
+  const band = Score.bandOf(noCheeseT, 'cheese');
+  check('nocheese overrides the cheese band', band[0] === 0 && band[1] <= 10);
+  check('zero cheese is perfect under nocheese', Score.amountGrade(0, band) !== 'off'
+    && Score.amountFrac(0, band) === 1);
+  check('normal cheese amount fails under nocheese', Score.amountFrac(60, band) === 0);
+
+  // half-and-half: side placement is the whole test
+  const halfT = {
+    size: 'M', sauce: 'normal', cheese: 'normal', bake: 'normal', half: true,
+    toppings: [{ type: 'pepperoni', count: 4 }, { type: 'mushroom', count: 4 }],
+    halves: { L: [{ type: 'pepperoni', count: 4 }], R: [{ type: 'mushroom', count: 4 }] },
+  };
+  const mkPieces = (correct) => {
+    const p = [];
+    for (let i = 0; i < 4; i++) p.push({ type: 'pepperoni', x: correct ? -30 - i : 30 + i, y: i * 8 - 12 });
+    for (let i = 0; i < 4; i++) p.push({ type: 'mushroom', x: correct ? 30 + i : -30 - i, y: i * 8 - 12 });
+    return p;
+  };
+  const right = Score.halfResult({ toppings: mkPieces(true) }, halfT);
+  const swapped = Score.halfResult({ toppings: mkPieces(false) }, halfT);
+  check('correct halves score perfect', right.grade === 'perfect' && right.frac === 1);
+  check('swapped halves collapse the score', swapped.frac < 0.4, `(frac ${swapped.frac.toFixed(2)})`);
+
+  // groups appear once unlocked, never for regulars, with scaled patience
+  s.toppings = ['pepperoni', 'mushroom'];
+  s.nextDay = null; ensureNextDay(s);
+  let groups = 0, groupOnRegular = 0, three = 0;
+  for (let i = 0; i < 400; i++) {
+    for (const c of Orders.generateDay(s)) {
+      if (c.group) {
+        groups++;
+        if (c.regular) groupOnRegular++;
+        if (c.group.tickets.length === 3) three++;
+        if (Math.abs(c.drainScale - 1 / BAL.GROUP.PATIENCE_MULT) > 1e-9) groupOnRegular += 100;
+      }
+    }
+  }
+  check('group orders roll at L30', groups > 0, `(${groups})`);
+  check('groups never land on regulars, patience scaled', groupOnRegular === 0);
+  check('three-pizza groups exist', three > 0);
+
+  // pre-order offers roll into the next-day plan at L30
+  let offers = 0;
+  for (let i = 0; i < 60; i++) {
+    s.nextDay = null;
+    const plan = ensureNextDay(s);
+    offers += (plan.preorders || []).length;
+    if ((plan.preorders || []).some(o => !o.ticket.preorder || o.accepted)) offers = -1e9;
+  }
+  check('pre-order offers roll, flagged, unaccepted', offers > 60, `(${offers})`);
+  const low = newGame();
+  low.nextDay = null;
+  check('no pre-orders before the unlock', (ensureNextDay(low).preorders || []).length === 0);
+
+  // pre-order premium in the price
+  const pt = { size: 'M', sauce: 'normal', cheese: 'normal', bake: 'normal', toppings: [], preorder: true };
+  const pz2 = { size: 'M', R: BAL.PIZZA.RADIUS.M, sauceCoverage: 60, cheese: new Array(60), toppings: [], bakeZone: 'normal' };
+  const pres = Score.scoreOrder({ pizza: pz2, ticket: pt, elapsed: 20, splats: 0, state: s, prepGrace: false });
+  const norm = Score.scoreOrder({ pizza: pz2, ticket: { ...pt, preorder: false }, elapsed: 20, splats: 0, state: s, prepGrace: false });
+  check('pre-orders pay the premium', Math.abs(pres.price / norm.price - (1 + BAL.PREORDER.PREMIUM)) < 1e-9);
+}
+
 // ---- 9. XP / level spine ------------------------------------------------------
 console.log('xp & levels');
 {

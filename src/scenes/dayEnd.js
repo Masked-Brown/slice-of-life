@@ -58,6 +58,8 @@ export const DayEndScene = {
       money: Math.round(state.money),
       wasteCost: Math.round(wasteCost * 100) / 100, wasteN,
       emergency: Math.round((stats.emergency || 0) * 100) / 100,
+      preorders: stats.preordersTaken || 0, preordersLate: stats.preordersLate || 0,
+      sidesSold: stats.sidesSold || 0,
     });
 
     state.day += 1;
@@ -104,6 +106,14 @@ export const DayEndScene = {
     ];
     if ((stats.sidesSold || 0) > 0) {
       ui.lines.push({ label: `Sides × ${stats.sidesSold}`, value: sideTotal, money: true });
+    }
+    if ((stats.preordersTaken || 0) > 0) {
+      const missed = stats.preordersTaken - (stats.preordersDone || 0);
+      ui.lines.push({
+        label: 'Pre-orders 📞',
+        value: `${stats.preordersDone}/${stats.preordersTaken}${stats.preordersLate ? ` (${stats.preordersLate} late)` : ''}${missed ? ' — missed!' : ''}`,
+        money: false,
+      });
     }
     if (bonusTotal > 0) ui.lines.push({ label: 'Goals & milestones 🎯', value: bonusTotal, money: true });
     if (stats.goalDesc) {

@@ -14,16 +14,25 @@ const BAKE_ORDER = ['raw', 'light', 'normal', 'well', 'burnt'];
 
 export const Score = {
 
-  // sauce/cheese: % amount vs named band → fraction 0..1
-  amountFrac(pct, bandName) {
-    const [lo, hi] = BAL.SCORE.BANDS[bandName];
+  // the effective band for a station: modifiers override the named band
+  bandOf(ticket, which) {
+    if (ticket && ticket.modifier) {
+      const m = BAL.MODIFIERS[ticket.modifier];
+      if (m && m.band && m.band[which]) return m.band[which];
+    }
+    return BAL.SCORE.BANDS[ticket ? ticket[which] : 'normal'];
+  },
+
+  // sauce/cheese: % amount vs band (name or [lo,hi] override) → fraction 0..1
+  amountFrac(pct, band) {
+    const [lo, hi] = Array.isArray(band) ? band : BAL.SCORE.BANDS[band];
     if (pct >= lo && pct <= hi) return 1;
     const d = pct < lo ? lo - pct : pct - hi;
     return clamp(1 - d / BAL.SCORE.BAND_FALLOFF, 0, 1);
   },
 
-  amountGrade(pct, bandName) {
-    const [lo, hi] = BAL.SCORE.BANDS[bandName];
+  amountGrade(pct, band) {
+    const [lo, hi] = Array.isArray(band) ? band : BAL.SCORE.BANDS[band];
     const m = (hi - lo) * BAL.SCORE.PERFECT_MARGIN;
     if (pct >= lo + m && pct <= hi - m) return 'perfect';
     if (pct >= lo && pct <= hi) return 'good';
@@ -48,8 +57,35 @@ export const Score = {
     return s;
   },
 
+  // half-and-half: each half is judged on its own pieces (x<0 = left).
+  // A piece on the wrong side shorts its own half AND reads as an extra
+  // on the other — placement is the whole test.
+  halfResult(pizza, ticket) {
+    const S = BAL.SCORE;
+    let sum = 0, n = 0, offBy = 0, extras = 0;
+    for (const side of ['L', 'R']) {
+      const wants = ticket.halves[side] || [];
+      const piecesOn = pizza.toppings.filter(p => (side === 'L' ? p.x < 0 : p.x >= 0));
+      const wantTypes = new Set(wants.map(w => w.type));
+      for (const w of wants) {
+        const placed = piecesOn.filter(p => p.type === w.type).length;
+        const off = Math.abs(placed - w.count);
+        offBy += off;
+        sum += clamp(1 - S.TOPPING_COUNT_PENALTY * off, 0, 1);
+        n++;
+      }
+      extras += new Set(piecesOn.map(p => p.type).filter(t => !wantTypes.has(t))).size;
+    }
+    let frac = n ? sum / n : 1;
+    frac = clamp(frac - (extras * S.EXTRA_TYPE_PENALTY) / S.WEIGHTS.toppings, 0, 1);
+    const grade = (offBy === 0 && extras === 0) ? 'perfect'
+      : (offBy <= 1 && extras === 0) ? 'good' : 'off';
+    return { frac, grade, offBy, extras };
+  },
+
   toppingsResult(pizza, ticket) {
     const S = BAL.SCORE;
+    if (ticket.half && ticket.halves) return this.halfResult(pizza, ticket);
     const wanted = ticket.toppings;
     if (!wanted.length) return { frac: 1, grade: 'perfect', offBy: 0, extras: 0 };
     let sum = 0, offBy = 0, spreadSum = 0;
@@ -105,14 +141,24 @@ export const Score = {
 
     const sizeFrac = pizza.size === ticket.size ? 1 : 0;
     const splatPen = Math.min(splats * S.SPLAT_PENALTY, S.SPLAT_PENALTY_MAX);
-    let sauceFrac = clamp(this.amountFrac(pizza.sauceCoverage, ticket.sauce) - splatPen / W.sauce, 0, 1);
+    let sauceFrac = clamp(this.amountFrac(pizza.sauceCoverage, this.bandOf(ticket, 'sauce')) - splatPen / W.sauce, 0, 1);
     // wrong sauce variant: most of the station credit gone
     if (ticket.sauceType && pizza.sauceType && pizza.sauceType !== ticket.sauceType) {
       sauceFrac *= S.WRONG_SAUCE_MULT;
     }
-    const cheeseFrac = this.amountFrac(this.cheesePct(pizza), ticket.cheese);
+    const cheeseFrac = this.amountFrac(this.cheesePct(pizza), this.bandOf(ticket, 'cheese'));
     const top = this.toppingsResult(pizza, ticket);
     const bake = this.bakeResult(pizza.bakeZone, ticket.bake);
+    // "extra well-done": WELL isn't enough — it has to be the deep half
+    if (ticket.modifier === 'extrawell' && !bake.burnt && bake.grade === 'perfect'
+        && pizza.zonesAtPull != null && pizza.bake != null) {
+      const z = pizza.zonesAtPull;
+      const deepAt = z.normal + (z.well - z.normal) * BAL.BAKE_DEEP_FRAC;
+      if (pizza.bake < deepAt) {
+        bake.frac = S.BAKE_ADJACENT_CREDIT;
+        bake.grade = 'good';
+      }
+    }
 
     let accuracy =
       sizeFrac * W.size + sauceFrac * W.sauce + cheeseFrac * W.cheese +
@@ -148,6 +194,8 @@ export const Score = {
     if (ticket.specialty && BAL.RECIPES[ticket.specialty]) {
       price *= 1 + BAL.RECIPES[ticket.specialty].premium;
     }
+    // phone pre-orders pay ahead for the privilege
+    if (ticket.preorder) price *= 1 + BAL.PREORDER.PREMIUM;
 
     const tips = tipMult(state);
     const moneyFor = sat => {
@@ -207,23 +255,79 @@ export const Serve = {
       }
     }
 
+    // pre-orders expected the kitchen ready — lateness caps their delight
+    let lateSat = 0;
+    if (cust.preorder) {
+      const late = Math.max(0, elapsed - BAL.PREORDER.GRACE);
+      lateSat = -Math.min(BAL.PREORDER.LATE_SAT_MAX, late * BAL.PREORDER.LATE_SAT_PER_SEC);
+    }
+
     const res = Score.scoreOrder({
       pizza: svc.pizza, ticket, elapsed,
       splats: svc.splatCount, state: svc.state, prepGrace,
       gradeBonus: Score.gradeSatBonus(svc.orderGrades),
-      satAdjust: sideSat,
+      satAdjust: sideSat + lateSat,
     });
     res.sidePay = sidePay;
     res.sideKey = ticket.side || null;
     res.sideMade = sidePay > 0;
+    res.lateSat = lateSat;
+
+    // group orders: park this pizza, pin the next ticket, keep cooking
+    if (cust.group && cust.group.idx < cust.group.tickets.length - 1) {
+      const grp = cust.group;
+      grp.results.push(res);
+      Sfx.bell();
+      const pz = svc.pizza;
+      svc.pizza = null;
+      for (const t of pz.toppings) svc.usage[t.type] = (svc.usage[t.type] || 0) + 1;
+      pz.state = 'parked';
+      svc.groupParked = svc.groupParked || [];
+      svc.groupParked.push(pz);
+      Juice.floatText(svc.pass.x, svc.pass.y - 70, `Pizza ${grp.idx + 1} down!`, { color: '#fff4d6', size: 20 });
+      Juice.tween({
+        target: pz, to: { x: svc.pass.x - 56 + grp.idx * 44, y: svc.pass.y + 14, scale: 0.4 },
+        dur: 0.4, ease: (t) => t * t * (3 - 2 * t),
+      });
+      grp.idx++;
+      cust.ticket = grp.tickets[grp.idx];
+      svc.onGroupNext(cust);
+      return;
+    }
+
+    // group finale: fold the parked results in — one payout, one reaction
+    if (cust.group) {
+      const grp = cust.group;
+      const all = [...grp.results, res];
+      const prem = 1 + BAL.GROUP.PREMIUM;
+      res.pay = all.reduce((a, r) => a + r.pay, 0) * prem;
+      res.tip = all.reduce((a, r) => a + r.tip, 0) * prem;
+      res.satisfaction = Math.round(all.reduce((a, r) => a + r.satisfaction, 0) / all.length);
+      res.perfect = all.every(r => r.perfect);
+      res.accuracy = Math.round(all.reduce((a, r) => a + r.accuracy, 0) / all.length);
+      let stars = 1;
+      for (const [min, st] of BAL.SCORE.STAR_THRESHOLDS) if (res.satisfaction >= min) { stars = st; break; }
+      res.stars = stars;
+      res.groupTickets = grp.tickets;
+      res.groupSize = all.length;
+    }
 
     Sfx.bell();
     svc.stage = 'handoff';
     Juice.floatText(svc.pass.x, svc.pass.y - 70, 'Order up!', { color: '#fff4d6', size: 20 });
 
-    // pizza flies to the customer
+    // pizza (and any parked group pizzas) fly to the customer
     const pz = svc.pizza;
     pz.state = 'fly';
+    if (svc.groupParked && svc.groupParked.length) {
+      for (const parked of svc.groupParked) {
+        parked.state = 'fly';
+        Juice.tween({
+          target: parked, to: { x: cust.x, y: cust.y + 26, scale: 0.3 },
+          dur: 0.45, ease: (t) => t * t * (3 - 2 * t),
+        });
+      }
+    }
     Juice.tween({
       target: pz, to: { x: cust.x, y: cust.y + 26, scale: 0.45 },
       dur: 0.45, ease: (t) => t * t * (3 - 2 * t),
@@ -239,11 +343,13 @@ export const Serve = {
     // analytics: pieces consumed + revenue attributed per topping type
     for (const t of pz.toppings) svc.usage[t.type] = (svc.usage[t.type] || 0) + 1;
     const satMult = lerp(E.SAT_MULT_MIN, E.SAT_MULT_MAX, res.satisfaction / 100);
-    for (const w of cust.ticket.toppings) {
-      const def = BAL.TOPPINGS[w.type];
-      const typePrice = E.PRICE_PER_TOPPING_TYPE + (def ? BAL.TIER_PRICE_ADD[def.tier] || 0 : 0);
-      svc.toppingRevenue[w.type] = (svc.toppingRevenue[w.type] || 0)
-        + typePrice * priceMultiplier(state) * satMult;
+    for (const ticket of (res.groupTickets || [cust.ticket])) {
+      for (const w of ticket.toppings) {
+        const def = BAL.TOPPINGS[w.type];
+        const typePrice = E.PRICE_PER_TOPPING_TYPE + (def ? BAL.TIER_PRICE_ADD[def.tier] || 0 : 0);
+        svc.toppingRevenue[w.type] = (svc.toppingRevenue[w.type] || 0)
+          + typePrice * priceMultiplier(state) * satMult;
+      }
     }
     // grade bookkeeping for the "is premium worth it?" analytics line
     svc.gradeUplift = (svc.gradeUplift || 0) + (res.gradeUplift || 0);
@@ -269,11 +375,12 @@ export const Serve = {
       Juice.floatText(cust.x - 46, cust.y - 118, '+' + gbp(res.sidePay) + ' side', { color: '#8fd0f0', size: 18 });
     }
 
+    const pizzas = res.groupSize || 1;
     const total = res.pay + res.tip + (res.sidePay || 0);
     state.money += total;
-    state.stats.lifetimeServed++;
+    state.stats.lifetimeServed += pizzas;
     state.stats.lifetimeEarned += total;
-    state.lifetime.served++;
+    state.lifetime.served += pizzas;
     state.lifetime.earned += total;
     if (res.perfect) {
       state.stats.lifetimePerfects++;
@@ -323,8 +430,17 @@ export const Serve = {
       Sfx.perfect();
     }
 
+    // pre-order bookkeeping: on time or late, the phone line remembers
+    if (cust.preorder) {
+      cust.preorder.done = true;
+      cust.preorder.late = (res.lateSat || 0) < 0;
+      svc.preordersDone = (svc.preordersDone || 0) + 1;
+      if (cust.preorder.late) svc.preordersLate = (svc.preordersLate || 0) + 1;
+      else svc.onXP(BAL.XP.PREORDER, cust.x, cust.y - 20);
+    }
+
     // chef XP — accuracy is the multiplier, perfection the cherry
-    let xp = orderXP(cust.ticket, res);
+    let xp = orderXP(cust.ticket, res) * pizzas;
     if (res.sideMade) xp += BAL.XP.SIDE_BONUS;
     svc.onXP(xp, cust.x, cust.y - 40);
 
