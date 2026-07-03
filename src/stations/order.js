@@ -310,14 +310,24 @@ export const Orders = {
 
     const pm = patienceMult(state);
 
+    // queue slots count only customers actually in line — the served, the
+    // storming, and (dual oven) the waiting all stand elsewhere
+    const queueers = svc.customers.filter(c =>
+      c.state === 'enter' || c.state === 'queued' || c.state === 'front');
+    const waiting = svc.customers.filter(c => c.state === 'waiting');
+
     for (let i = svc.customers.length - 1; i >= 0; i--) {
       const c = svc.customers[i];
 
       // slot targets — only steer customers still in the queue; leavers
       // keep the door as their target
       const inQueue = c.state === 'enter' || c.state === 'queued' || c.state === 'front';
-      const slot = svc.customers.indexOf(c);
+      const slot = queueers.indexOf(c);
       if (inQueue) c.tx = FRONT_X - slot * SLOT_GAP;
+      if (c.state === 'waiting') {
+        c.tx = 764 + waiting.indexOf(c) * 56;   // pickup spot by the pass
+        c.y = 100;
+      }
 
       // movement (ease toward target; storm-outs move in a hurry)
       const speed = c.state === 'storming' ? 5.2 : 3.2;
@@ -367,13 +377,20 @@ export const Orders = {
   },
 
   front(svc) {
-    const c = svc.customers[0];
-    return c && c.state === 'front' ? c : null;
+    const c = svc.customers.find(k => k.state === 'front');
+    return c || null;
+  },
+
+  // dual oven: this customer's pizza is baking — they step to the pickup
+  // spot by the pass and wait (patience frozen: the order is committed)
+  sendToWaiting(svc, c) {
+    c.state = 'waiting';
+    c.reaction = null;
+    Sfx.tick();
   },
 
   // served customer reacts then leaves
-  dismissFront(svc, mood) {
-    const c = svc.customers[0];
+  dismiss(svc, c, mood) {
     if (!c) return;
     c.reaction = mood;
     c.state = 'served';
@@ -385,8 +402,12 @@ export const Orders = {
     // linger a moment with the reaction face, then go
     Juice.tween({
       dur: 0.85, onUpdate: () => { },
-      onDone: () => { c.state = 'leaving'; c.tx = DOOR_X; },
+      onDone: () => { c.state = 'leaving'; c.tx = DOOR_X; c.y = QUEUE_Y; },
     });
+  },
+
+  dismissFront(svc, mood) {
+    this.dismiss(svc, this.front(svc), mood);
   },
 
   // ---- ticket DOM -----------------------------------------------------------
@@ -447,6 +468,48 @@ export const Orders = {
   render(svc, ctx) {
     // back wall strip, door
     for (const c of svc.customers) this._drawCustomer(svc, ctx, c);
+    if (svc.state.upgrades.rail >= 1) this._drawRailPreview(svc, ctx);
+  },
+
+  // ticket rail: the NEXT order floats over its owner's head — pure
+  // information, pure strategist fuel (save those last mushrooms?)
+  _drawRailPreview(svc, ctx) {
+    const queueers = svc.customers.filter(c =>
+      c.state === 'queued' || c.state === 'front');
+    const next = queueers[1];
+    if (!next || !next.ticket) return;
+    const t = next.ticket;
+    const dots = t.toppings.slice(0, 4);
+    const w = 34 + dots.length * 30;
+    const x = next.x - w / 2, y = next.y - 130;
+
+    ctx.save();
+    ctx.globalAlpha = 0.94;
+    rr(ctx, x, y, w, 30, 8);
+    ctx.fillStyle = '#fffbef'; ctx.fill();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = OUTLINE; ctx.stroke();
+    // stem to the head
+    ctx.beginPath();
+    ctx.moveTo(next.x - 5, y + 30); ctx.lineTo(next.x, y + 38); ctx.lineTo(next.x + 5, y + 30);
+    ctx.closePath();
+    ctx.fillStyle = '#fffbef'; ctx.fill(); ctx.stroke();
+
+    ctx.font = '900 14px Trebuchet MS, system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#4a2e1d';
+    ctx.fillText(t.size, x + 15, y + 15);
+    dots.forEach((wnt, i) => {
+      const dx = x + 34 + i * 30;
+      const def = BAL.TOPPINGS[wnt.type];
+      ctx.fillStyle = def ? def.dot : '#999';
+      ctx.beginPath(); ctx.arc(dx + 6, y + 15, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = OUTLINE; ctx.stroke();
+      ctx.fillStyle = '#4a2e1d';
+      ctx.font = '900 11px Trebuchet MS, system-ui, sans-serif';
+      ctx.fillText('×' + wnt.count, dx + 21, y + 15);
+      ctx.font = '900 14px Trebuchet MS, system-ui, sans-serif';
+    });
+    ctx.restore();
   },
 
   _drawCustomer(svc, ctx, c) {

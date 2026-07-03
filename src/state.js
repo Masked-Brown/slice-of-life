@@ -28,6 +28,7 @@ export function newGame(muted = false) {
     crusts: ['classic'],         // owned crust types
     sides: [],                   // owned side stations ('garlicbread' | 'drinks')
     grades: {},                  // { gradedKey: 'budget'|'standard'|'premium' }
+    dials: { sauce: 'light', cheese: 'light' },  // auto-dispenser/hopper calibration
     boosts: { prep: 0, ad: 0 },  // bought for tomorrow; consumed at day start
     tutorialDone: false,
     muted,
@@ -90,6 +91,7 @@ export function migrate(s) {
     boosts: { ...fresh.boosts, ...s.boosts },
     volumes: { ...fresh.volumes, ...s.volumes },
     grades: { ...fresh.grades, ...s.grades },
+    dials: { ...fresh.dials, ...s.dials },
     lifetime: { ...fresh.lifetime, ...s.lifetime },
     meta: { ...fresh.meta, ...s.meta },
     stock: { ...s.stock },

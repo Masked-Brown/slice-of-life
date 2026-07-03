@@ -98,10 +98,17 @@ export const BAL = {
 
   // ---- Hold-to-pour (sauce & cheese) --------------------------------------
   POUR: {
-    SAUCE_RATE: [0.34, 0.40, 0.46, 0.52],     // coverage fraction/sec by ladle tier
-    CHEESE_RATE: [44, 52, 60, 70],            // flecks/sec by shaker tier
-    IN_BAND_SLOW: [0.8, 0.75, 0.62, 0.5],     // rate × this while inside the ticket band
+    SAUCE_RATE: [0.34, 0.40, 0.46, 0.52, 0.52],   // coverage fraction/sec by ladle tier
+    CHEESE_RATE: [44, 52, 60, 70, 70],            // flecks/sec by shaker tier
+    IN_BAND_SLOW: [0.8, 0.75, 0.62, 0.5, 0.5],    // rate × this while inside the ticket band
     OVERPOUR_SPLAT_CD: 0.5,                   // (s) between counter splats past full
+  },
+
+  // ---- Automation (tier-4 tools + proofer + second oven) --------------------
+  AUTO: {
+    POUR_RATE_MULT: 2.4,         // auto-pour runs this × the manual rate
+    TARGET_JITTER: 0.05,         // lands within ±this fraction of the dial band
+    WAIT_DRAIN: 0,               // waiting customers' patience is frozen (they've ordered)
   },
 
   // ---- Oven -------------------------------------------------------------
@@ -118,12 +125,20 @@ export const BAL = {
   UPGRADES: {
     oven:   { name: 'Stone Oven',   costs: [90, 260, 600],
               tiers: ['Wider perfect zones', 'Even wider zones, hotter', 'Master oven — huge zones'] },
-    ladle:  { name: 'Sauce Ladle',  costs: [70, 200, 480],
-              tiers: ['Faster pour', 'Steadier pour near the band', 'Pro ladle — pinpoint control'] },
-    shaker: { name: 'Cheese Shaker', costs: [70, 200, 480],
-              tiers: ['Faster sprinkle', 'Steadier hand near the band', 'Blizzard mode — fast & precise'] },
+    ladle:  { name: 'Sauce Ladle',  costs: [70, 200, 480, 1400],
+              tiers: ['Faster pour', 'Steadier pour near the band', 'Pro ladle — pinpoint control',
+                      'AUTO-DISPENSER — dial a default, it pours, you confirm or top up'] },
+    shaker: { name: 'Cheese Shaker', costs: [70, 200, 480, 1400],
+              tiers: ['Faster sprinkle', 'Steadier hand near the band', 'Blizzard mode — fast & precise',
+                      'CHEESE HOPPER — dial a default, it sprinkles, you confirm or top up'] },
     tongs:  { name: 'Topping Tongs', costs: [90, 270, 630],
               tiers: ['Edge-save grip', 'Neat-grid snapping', 'Double-grab'] },
+    proofer: { name: 'Dough Proofer', costs: [850],
+              tiers: ['The ticket’s base proofs itself — dough becomes one confirm-click'] },
+    oven2:  { name: 'Second Oven Slot', costs: [2600],
+              tiers: ['Two slots, per-slot alarms — build the next order while one bakes'] },
+    rail:   { name: 'Ticket Rail', costs: [700],
+              tiers: ['See the next customer’s order over their head — plan two moves ahead'] },
     decor:  { name: 'Counter & Decor', costs: [110, 300, 690, 1200, 2000, 3200],
               tiers: ['Fresh paint, +1 queue slot, patience +15%',
                       'Plants & art, +1 slot, patience +15%',
@@ -448,7 +463,7 @@ export const BAL = {
     { level: 16, kind: 'modifier', id: 'modsB',       label: 'Fussier Requests', blurb: '“Double sauce”, “extra well-done” — autopilot beware.' },
     { level: 17, kind: 'topping', id: 'spinach',      label: 'Spinach',          blurb: 'Delicate — barely keeps two days.' },
     { level: 17, kind: 'group', id: 'group2',         label: 'Group Orders',     blurb: 'One ticket, two pizzas, one big payout.' },
-    { level: 18, kind: 'equipment', id: 'dispenser',  label: 'Sauce Auto-Dispenser', blurb: 'Calibrate it each morning; it pours, you confirm.' },
+    { level: 18, kind: 'upgradeTier', id: 'ladle', tier: 4, label: 'Sauce Auto-Dispenser', blurb: 'Dial a default; it pours, you confirm or top up by hand.' },
     { level: 18, kind: 'upgradeTier', id: 'decor', tier: 4, label: 'Decor: Gallery Wall', blurb: 'Neighbourhood art, warmer light — and better tips.' },
     { level: 18, kind: 'recipe', id: 'firebreather',  label: 'Specialty: Fire Breather', blurb: 'BBQ base, chilli, no survivors.' },
     { level: 19, kind: 'topping', id: 'meatball',     label: 'Meatball',         blurb: 'Hearty pieces, heavyweight margins.' },
@@ -457,7 +472,7 @@ export const BAL = {
     { level: 20, kind: 'preorder', id: 'preorder2',   label: 'Second Phone Line', blurb: 'Take two pre-orders per day.' },
     { level: 21, kind: 'topping', id: 'anchovy',      label: 'Anchovy',          blurb: 'Loved by the few, loudly.' },
     { level: 21, kind: 'recipe', id: 'farmhouse',     label: 'Specialty: Farmhouse', blurb: 'White base, bacon, mushroom, sweetcorn.' },
-    { level: 22, kind: 'equipment', id: 'hopper',     label: 'Cheese Hopper',    blurb: 'Calibrated cheese, hands-free — you confirm.' },
+    { level: 22, kind: 'upgradeTier', id: 'shaker', tier: 4, label: 'Cheese Hopper', blurb: 'Calibrated cheese, hands-free — you confirm or top up.' },
     { level: 22, kind: 'upgradeTier', id: 'supply', tier: 4, label: 'Supply Deals IV', blurb: 'Importer contract.' },
     { level: 22, kind: 'event', id: 'slow',           label: 'Slow Mornings',    blurb: 'Quiet days: fewer, patient customers with big fussy orders.' },
     { level: 23, kind: 'topping', id: 'prosciutto',   label: 'Prosciutto',       blurb: 'Exotic tier: fragile, expensive, glorious.' },

@@ -215,7 +215,7 @@ console.log('scenario A: full first order');
   const zoneHi = { raw: Z.raw, light: Z.light, normal: Z.normal, well: Z.well }[ticket.bake];
   const pullAt = zoneLo + (zoneHi - zoneLo) * 0.4;
   check('bake reaches the ticket zone', await waitFor(page,
-    new Function(`return window.__game._svc.oven.prog >= ${pullAt}`), 16000, 20));
+    new Function(`return window.__game._svc.ovens[0].prog >= ${pullAt}`), 16000, 20));
   await clickCanvas(page, 1090, 350);
   check('pulled → serve stage', await waitFor(page, () => window.__game._svc.stage === 'serve', 3000));
   const zone = await svcEval(page, () => window.__game._svc.pizza.bakeZone);
@@ -319,6 +319,115 @@ console.log('scenario B: shop tabs + day board flags');
   await page.click('#db-shop');
   check('back-to-shop returns to the shop', await waitFor(page, () =>
     document.querySelector('.shop-panel') !== null));
+
+  await page.close();
+}
+
+// =====================================================================
+// Scenario C — second oven concurrency + automation arc
+// (proofer one-click, auto-dispenser, cheese hopper, dual slots, bell)
+// =====================================================================
+console.log('scenario C: second oven + automation');
+{
+  const save = newGame();
+  save.phase = 'service';
+  save.day = 1;                       // 1-type tickets keep the build short
+  save.money = 500;
+  save.tutorialDone = true;
+  save.level = 30;
+  save.xp = 99999;
+  save.upgrades.oven2 = 1;
+  save.upgrades.proofer = 1;
+  save.upgrades.ladle = 4;
+  save.upgrades.shaker = 4;
+  save.dials = { sauce: 'normal', cheese: 'normal' };
+  // mark every unlock seen so no reveal card pauses the floor
+  for (const u of BAL.UNLOCKS) save.seenUnlocks[`${u.kind}:${u.id}:${u.tier || 1}`] = true;
+
+  const page = await newPage();
+  await page.addInitScript(s => localStorage.setItem('slice-of-life-save-v1', JSON.stringify(s)), save);
+  await page.goto(`http://127.0.0.1:${PORT}/`);
+  await page.click('#btn-continue');
+
+  await waitFor(page, () => {
+    const el = document.getElementById('ui-dayboard');
+    return el && !el.classList.contains('hidden');
+  });
+  await page.click('#db-start');
+
+  // strip randomness: plain identical tickets, no personas/groups/pre-orders
+  await page.evaluate(() => {
+    const svc = window.__game._svc;
+    svc.preorders = [];
+    svc.pending.forEach(c => {
+      c.group = null; c.role = null; c.archetype = null; c.preorder = null; c.drainScale = 1;
+      c.ticket = { size: 'M', sauce: 'normal', cheese: 'normal', bake: 'normal',
+        sauceType: 'tomato', crust: 'classic', special: false,
+        toppings: [{ type: 'pepperoni', count: 3 }] };
+    });
+    svc.arrivalIn = 0.1;
+  });
+
+  check('dual oven slots exist', await page.evaluate(() => window.__game._svc.ovens.length === 2));
+  check('front arrives', await waitFor(page, () => window.__game._svc.stage === 'dough', 30000));
+
+  // proofer: one click anywhere on the tray picks the ticket's base
+  await clickCanvas(page, 355, 248);
+  check('proofer one-click dough', await waitFor(page, () => window.__game._svc.stage === 'sauce', 4000));
+
+  // auto-dispenser pours to the normal band by itself
+  check('dispenser pours hands-free', await waitFor(page, () => {
+    const svc = window.__game._svc;
+    return svc.pizza && svc.pizza.sauceCoverage >= 50 && svc._auto.sauce && !svc._auto.sauce.active;
+  }, 8000));
+  await clickCanvas(page, 839, 470);          // NEXT
+  check('→ cheese stage', await waitFor(page, () => window.__game._svc.stage === 'cheese', 3000));
+
+  // hopper sprinkles to the band by itself
+  check('hopper fills hands-free', await waitFor(page, () => {
+    const svc = window.__game._svc;
+    return svc.pizza && svc.pizza.cheese.length / 110 * 100 >= 50;
+  }, 8000));
+  await clickCanvas(page, 839, 470);          // NEXT
+  check('→ toppings stage', await waitFor(page, () => window.__game._svc.stage === 'toppings', 3000));
+
+  // three pepperoni on
+  for (let i = 0; i < 3; i++) {
+    const from = await canvasPoint(page, 258 + 56, 602 + 50);
+    const to = await canvasPoint(page, 610 + Math.cos(i * 2.4) * 40, 400 + Math.sin(i * 2.4) * 40);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 4 });
+    await page.mouse.up();
+    await sleep(40);
+  }
+  await clickCanvas(page, 839, 470);          // NEXT
+  await waitFor(page, () => window.__game._svc.stage === 'tooven', 3000);
+  await clickCanvas(page, 1090, 350);         // into the oven
+
+  // the flagship moment: customer steps aside, the counter frees up
+  check('customer steps to the pickup spot', await waitFor(page, () =>
+    window.__game._svc.customers.some(c => c.state === 'waiting'), 4000));
+  check('oven slot bakes while the counter is free', await page.evaluate(() => {
+    const svc = window.__game._svc;
+    return svc.ovens[0].has && svc.stage !== 'baking';
+  }));
+  check('next customer can be taken mid-bake', await waitFor(page, () =>
+    window.__game._svc.stage === 'dough', 30000));
+
+  // pull slot 1 in its zone, ring the bell for the waiting customer
+  const Z2 = BAL.OVEN.ZONES;
+  await waitFor(page, new Function(`return window.__game._svc.ovens[0].prog >= ${Z2.light + 0.03}`), 16000, 20);
+  await clickCanvas(page, 1020, 350);         // left slot half
+  check('pulled to the pass', await waitFor(page, () =>
+    !!window.__game._svc.passOrder, 3000));
+  await clickCanvas(page, 918, 248);          // bell
+  check('waiting customer served off the pass', await waitFor(page, () =>
+    window.__game._svc.served === 1, 6000));
+  check('the in-progress build survived the serve', await page.evaluate(() => {
+    const svc = window.__game._svc;
+    return svc.stage === 'dough' && svc.ticket !== null;
+  }));
 
   await page.close();
 }

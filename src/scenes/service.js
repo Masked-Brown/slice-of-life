@@ -106,8 +106,13 @@ export const ServiceScene = {
       onStormOut: (c, wasFront) => this._onStormOut(c, wasFront),
       onDoughDown: size => this._onDoughDown(size),
       onBakeStart: () => this._setTutorial('oven'),
-      onBakeDone: () => this._onBakeDone(),
-      onOrderDone: res => this._onOrderDone(res),
+      onBakeDone: (idx, dual) => this._onBakeDone(idx, dual),
+      onOrderParkedInOven: slot => this._onOrderParkedInOven(slot),
+      canOverlap: () => {
+        const front = Orders.front(svc);
+        return front && !front.group;          // group builds stay classic
+      },
+      onOrderDone: (res, opts) => this._onOrderDone(res, opts),
       onXP: (amount, x, y) => this._onXP(amount, x, y),
       onGroupNext: c => this._onGroupNext(c),
       advanceStage: () => this._advanceStage(),
@@ -340,30 +345,57 @@ export const ServiceScene = {
     } else if (svc.stage === 'toppings') { svc.stage = 'tooven'; this._setTutorial('oven'); }
   },
 
-  _onBakeDone() {
-    const grade = svc.pizza.bakeZone === 'burnt' ? 'burnt'
-      : Oven.zoneOf(svc.pizza.bake, svc.state.upgrades.oven) === svc.ticket.bake ? 'perfect'
-      : Math.abs(['raw','light','normal','well','burnt'].indexOf(svc.pizza.bakeZone)
-               - ['raw','light','normal','well','burnt'].indexOf(svc.ticket.bake)) === 1 ? 'good' : 'off';
-    if (grade === 'burnt') {
-      Juice.floatText(PASS.x, PASS.y - 70, 'BURNT!', { color: '#ff6b52', size: 30 });
-      Sfx.popOff();
-    } else {
-      this._gradePop(grade, PASS.x, PASS.y - 70);
+  _onBakeDone(idx, dual) {
+    const po = svc.passOrder;
+    const pz = po ? po.pizza : svc.pizza;
+    const ticket = po && po.ticket ? po.ticket : svc.ticket;
+    if (pz && ticket) {
+      const order = ['raw', 'light', 'normal', 'well', 'burnt'];
+      const grade = pz.bakeZone === 'burnt' ? 'burnt'
+        : pz.bakeZone === ticket.bake ? 'perfect'
+        : Math.abs(order.indexOf(pz.bakeZone) - order.indexOf(ticket.bake)) === 1 ? 'good' : 'off';
+      if (grade === 'burnt') {
+        Juice.floatText(PASS.x, PASS.y - 70, 'BURNT!', { color: '#ff6b52', size: 30 });
+        Sfx.popOff();
+      } else {
+        this._gradePop(grade, PASS.x, PASS.y - 70);
+      }
     }
-    svc.stage = 'serve';
+    // single oven: classic lockstep. Dual: only a mid-group bake pauses us.
+    if (!dual || svc.stage === 'baking') svc.stage = 'serve';
   },
 
-  _onOrderDone(res) {
-    // daily-goal + milestone bookkeeping (ticket is still pinned here)
+  // dual oven: the order steps into the oven and its customer steps aside —
+  // the counter frees up for whoever's next
+  _onOrderParkedInOven(slot) {
+    const front = Orders.front(svc);
+    if (front) {
+      slot.cust = front;
+      Orders.sendToWaiting(svc, front);
+    }
+    Orders.unpinTicket(svc);
+    svc.ticket = null;
+    svc.stage = 'idle';
+    Build.resetForOrder(svc);
+    Sides.resetForOrder(svc);
+  },
+
+  _onOrderDone(res, opts = {}) {
+    // daily-goal + milestone bookkeeping
     if (res) {
-      const t = svc.ticket;
+      const t = opts.ticket || svc.ticket;
       if (t && t.size === 'L') svc.largeSold++;
       if (res.perfect) svc.perfectsToday++;
       if (res.elapsed <= res.par) svc.underPar++;
       for (const k in svc.usage) if (svc.usage[k] > 0) svc.usedTypes.add(k);
       this._checkGoal();
       this._checkMilestones();
+    }
+    // a waiting customer was served off the pass — the build in progress
+    // (someone else's order) carries on untouched
+    if (opts.light) {
+      this._updateHUD();
+      return;
     }
     Orders.unpinTicket(svc);
     svc.ticket = null;
@@ -441,14 +473,27 @@ export const ServiceScene = {
 
   // front customer left mid-order → trash the work in progress
   _abortOrder() {
+    Sfx.sauceStop();
+    // their pizza may be mid-bake (single oven, or a mid-group bake)
+    for (const slot of svc.ovens) {
+      if (slot.has && slot.ticket === svc.ticket) {
+        slot.has = false;
+        slot.pizza = null; slot.ticket = null; slot.cust = null; slot.side = null;
+        if (!svc.ovens.some(s => s.has)) Sfx.ovenStop();
+        Juice.tween({ target: slot, to: { door: 0 }, dur: 0.3 });
+      }
+    }
+    // a pulled-but-unserved pizza on the pass (single mode) goes with them
+    if (svc.passOrder && !svc.passOrder.cust) {
+      const pp = svc.passOrder.pizza;
+      svc.passOrder = null;
+      if (pp && pp !== svc.pizza) {
+        Juice.killTweensOf(pp);
+        Juice.tween({ target: pp, to: { y: 800, scale: 0.4, rot: 1.2 }, dur: 0.5, ease: Ease.inCubic });
+      }
+    }
     Orders.unpinTicket(svc);
     svc.ticket = null;
-    Sfx.sauceStop();
-    if (svc.oven.has) {
-      svc.oven.has = false;
-      Sfx.ovenStop();
-      Juice.tween({ target: svc.oven, to: { door: 0 }, dur: 0.3 });
-    }
     // a held piece goes back in its bin; pieces on the binned pizza are spent
     if (svc.held) {
       refundStock(svc.state, svc.held.type, svc.held.n);
@@ -649,23 +694,22 @@ export const ServiceScene = {
   onDown(g, x, y) {
     if (!svc || svc.dayEndQueued || svc.paused) return;
 
-    if (svc.stage === 'serve') {
-      if (Math.hypot(x - BELL.x, y - BELL.y) < BELL.r + 10) {
-        svc.bellPress = true;
-        Sfx.press();
-        return;
-      }
+    // the bell rings whenever a finished pizza sits on the pass
+    if (this._bellActive() && Math.hypot(x - BELL.x, y - BELL.y) < BELL.r + 10) {
+      svc.bellPress = true;
+      Sfx.press();
+      return;
     }
     if (svc.stage === 'baking') {
       if (Oven.ovenHit(x, y) || Oven.mouthHit(x, y)) {
-        Oven.pull(svc);
-        // first pizza of day 1 completes the tutorial on serve, hint stays
+        const idx = Oven.slotAt(svc, x);
+        if (svc.ovens[idx] && svc.ovens[idx].has) Oven.pull(svc, idx);
         return;
       }
       return; // while baking nothing else works — the tension IS the timing
     }
     if (svc.stage === 'tooven' && svc.pizza && svc.pizza.state === 'counter'
-        && Oven.ovenHit(x, y)) {
+        && Oven.ovenHit(x, y) && Oven.freeSlot(svc) >= 0) {
       // clicking the oven walks the pizza in (drag also works)
       Juice.tween({
         target: svc.pizza, to: { x: OVEN.x + OVEN.w / 2, y: OVEN.y + OVEN.h * 0.6 },
@@ -673,20 +717,36 @@ export const ServiceScene = {
       });
       return;
     }
+    // dual oven: pull a done slot any time (the counter keeps working)
+    if (Oven.dual(svc) && Oven.ovenHit(x, y)) {
+      const idx = Oven.slotAt(svc, x);
+      if (svc.ovens[idx] && svc.ovens[idx].has) {
+        Oven.pull(svc, idx);
+        return;
+      }
+    }
     if (Sides.onDown(svc, x, y)) return;
     Build.onDown(svc, x, y);
+  },
+
+  // bell is live when a pizza waits on the pass (single mode also gates on
+  // the classic serve stage so nothing changes for early-game hands)
+  _bellActive() {
+    if (!svc.passOrder) return false;
+    return Oven.dual(svc) || svc.stage === 'serve';
   },
 
   onMove(g, x, y) {
     if (!svc) return;
     Build.onMove(svc, x, y);
 
-    const overBell = svc.stage === 'serve' && Math.hypot(x - BELL.x, y - BELL.y) < BELL.r + 10;
+    const overBell = this._bellActive() && Math.hypot(x - BELL.x, y - BELL.y) < BELL.r + 10;
     if (overBell && !svc.bellHover) Sfx.tick();
     svc.bellHover = overBell;
 
     // dragging the pizza over the oven mouth slides it in
-    if (svc.stage === 'tooven' && svc.pizza && svc.pizza.state === 'drag' && Oven.mouthHit(x, y)) {
+    if (svc.stage === 'tooven' && svc.pizza && svc.pizza.state === 'drag'
+        && Oven.mouthHit(x, y) && Oven.freeSlot(svc) >= 0) {
       Oven.insert(svc);
     }
   },
@@ -695,7 +755,7 @@ export const ServiceScene = {
     if (!svc) return;
     if (svc.bellPress) {
       svc.bellPress = false;
-      if (Math.hypot(x - BELL.x, y - BELL.y) < BELL.r + 14 && svc.stage === 'serve') {
+      if (Math.hypot(x - BELL.x, y - BELL.y) < BELL.r + 14 && this._bellActive()) {
         // tutorial completes on the first successful serve
         if (svc.state.day === 1 && !svc.state.tutorialDone) {
           svc.state.tutorialDone = true;
@@ -722,6 +782,9 @@ export const ServiceScene = {
     Sides.render(svc, ctx);
     this._renderPass(ctx);
     for (const parked of svc.groupParked) Build.drawPizza(ctx, parked);
+    if (svc.passOrder && svc.passOrder.pizza !== svc.pizza) {
+      Build.drawPizza(ctx, svc.passOrder.pizza);
+    }
     Build.render(svc, ctx);
     if (svc.stage === 'idle' && svc.customers.length === 0 && svc.pending.length > 0) {
       ctx.save();
@@ -1099,7 +1162,7 @@ export const ServiceScene = {
     ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE; ctx.stroke();
 
     // bell
-    const hot = svc.stage === 'serve';
+    const hot = this._bellActive();
     const press = svc.bellPress ? 0.9 : 1;
     const hov = svc.bellHover && !svc.bellPress ? 1.08 : 1;
     ctx.translate(BELL.x, BELL.y);

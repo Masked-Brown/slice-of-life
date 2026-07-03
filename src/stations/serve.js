@@ -235,23 +235,30 @@ export const Score = {
 export const Serve = {
 
   serveNow(svc) {
-    const cust = Orders.front(svc);
-    if (!cust || !svc.pizza) return;
+    const po = svc.passOrder;
+    if (!po || !po.pizza) return;
+    const cust = po.cust || Orders.front(svc);
+    if (!cust) return;
+    const dual = svc.ovens.length > 1;
+    // serving someone at the pickup spot leaves the current build untouched
+    const light = !!(po.cust && po.cust.state === 'waiting');
+    const pizza = po.pizza;
+    const ticket = po.ticket || cust.ticket;
 
     const elapsed = svc.elapsed - (cust.frontAt ?? svc.elapsed);
     const prepGrace = svc.prepLeft > 0;
     if (prepGrace) svc.prepLeft--;
 
-    // side outcome shifts satisfaction and (if made) earns its own money
-    const ticket = cust.ticket;
+    // side outcome shifts satisfaction and (if made) earns its own money.
+    // With the second oven a side rides along in the order snapshot.
+    const sideState = light ? po.side : svc.side;
     let sideSat = 0, sidePay = 0;
     if (ticket.side) {
       const S = BAL.SIDES[ticket.side];
-      const side = svc.side;
-      if (side && side.state === 'ready') {
-        sidePay = S.price * (BAL.SIDE_PAY_FLOOR + (1 - BAL.SIDE_PAY_FLOOR) * side.frac)
+      if (sideState && sideState.state === 'ready') {
+        sidePay = S.price * (BAL.SIDE_PAY_FLOOR + (1 - BAL.SIDE_PAY_FLOOR) * sideState.frac)
           * (svc.state.meta ? svc.state.meta.mult : 1);
-        sideSat = side.frac > 0.9 ? BAL.SIDE_SAT.PERFECT : side.frac > 0.5 ? 0 : BAL.SIDE_SAT.SLOPPY;
+        sideSat = sideState.frac > 0.9 ? BAL.SIDE_SAT.PERFECT : sideState.frac > 0.5 ? 0 : BAL.SIDE_SAT.SLOPPY;
       } else {
         sideSat = BAL.SIDE_SAT.MISSING;      // ordered, never made — they notice
       }
@@ -265,9 +272,10 @@ export const Serve = {
     }
 
     const res = Score.scoreOrder({
-      pizza: svc.pizza, ticket, elapsed,
-      splats: svc.splatCount, state: svc.state, prepGrace,
-      gradeBonus: Score.gradeSatBonus(svc.orderGrades),
+      pizza, ticket, elapsed,
+      splats: po.splats != null ? po.splats : svc.splatCount,
+      state: svc.state, prepGrace,
+      gradeBonus: Score.gradeSatBonus(light ? po.orderGrades : svc.orderGrades),
       satAdjust: sideSat + lateSat,
       eventMult: svc.eventPay || 1,
     });
@@ -275,21 +283,23 @@ export const Serve = {
     res.sideKey = ticket.side || null;
     res.sideMade = sidePay > 0;
     res.lateSat = lateSat;
+    res.light = light;
+    res.ticketServed = ticket;
 
     // group orders: park this pizza, pin the next ticket, keep cooking
     if (cust.group && cust.group.idx < cust.group.tickets.length - 1) {
       const grp = cust.group;
       grp.results.push(res);
       Sfx.bell();
-      const pz = svc.pizza;
-      svc.pizza = null;
-      for (const t of pz.toppings) svc.usage[t.type] = (svc.usage[t.type] || 0) + 1;
-      pz.state = 'parked';
+      svc.passOrder = null;
+      if (svc.pizza === pizza) svc.pizza = null;
+      for (const t of pizza.toppings) svc.usage[t.type] = (svc.usage[t.type] || 0) + 1;
+      pizza.state = 'parked';
       svc.groupParked = svc.groupParked || [];
-      svc.groupParked.push(pz);
+      svc.groupParked.push(pizza);
       Juice.floatText(svc.pass.x, svc.pass.y - 70, `Pizza ${grp.idx + 1} down!`, { color: '#fff4d6', size: 20 });
       Juice.tween({
-        target: pz, to: { x: svc.pass.x - 56 + grp.idx * 44, y: svc.pass.y + 14, scale: 0.4 },
+        target: pizza, to: { x: svc.pass.x - 56 + grp.idx * 44, y: svc.pass.y + 14, scale: 0.4 },
         dur: 0.4, ease: (t) => t * t * (3 - 2 * t),
       });
       grp.idx++;
@@ -316,13 +326,14 @@ export const Serve = {
     }
 
     Sfx.bell();
-    svc.stage = 'handoff';
+    if (!light) svc.stage = 'handoff';
     Juice.floatText(svc.pass.x, svc.pass.y - 70, 'Order up!', { color: '#fff4d6', size: 20 });
 
-    // pizza (and any parked group pizzas) fly to the customer
-    const pz = svc.pizza;
-    pz.state = 'fly';
-    if (svc.groupParked && svc.groupParked.length) {
+    // the pass clears; pizza (and any parked group pizzas) fly to the customer
+    svc.passOrder = null;
+    if (svc.pizza === pizza) svc.pizza = null;
+    pizza.state = 'fly';
+    if (!light && svc.groupParked && svc.groupParked.length) {
       for (const parked of svc.groupParked) {
         parked.state = 'fly';
         Juice.tween({
@@ -332,16 +343,15 @@ export const Serve = {
       }
     }
     Juice.tween({
-      target: pz, to: { x: cust.x, y: cust.y + 26, scale: 0.45 },
+      target: pizza, to: { x: cust.x, y: cust.y + 26, scale: 0.45 },
       dur: 0.45, ease: (t) => t * t * (3 - 2 * t),
-      onDone: () => this._payout(svc, cust, res, pz),
+      onDone: () => this._payout(svc, cust, res, pizza),
     });
   },
 
   _payout(svc, cust, res, pz) {
     const g = svc.game, state = svc.state;
     const E = BAL.ECONOMY;
-    svc.pizza = null;
 
     // analytics: pieces consumed + revenue attributed per topping type
     for (const t of pz.toppings) svc.usage[t.type] = (svc.usage[t.type] || 0) + 1;
@@ -508,11 +518,11 @@ export const Serve = {
     }
 
     // chef XP — accuracy is the multiplier, perfection the cherry
-    let xp = orderXP(cust.ticket, res) * pizzas;
+    let xp = orderXP(res.ticketServed || cust.ticket, res) * pizzas;
     if (res.sideMade) xp += BAL.XP.SIDE_BONUS;
     svc.onXP(xp, cust.x, cust.y - 40);
 
-    Orders.dismissFront(svc, mood);
-    svc.onOrderDone(res);
+    Orders.dismiss(svc, cust, mood);
+    svc.onOrderDone(res, { light: res.light, ticket: res.ticketServed });
   },
 };

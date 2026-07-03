@@ -69,6 +69,8 @@ export const Build = {
     svc.sauceSel = 'tomato';     // pot selection (click the pot to cycle)
     svc.crustSel = 'classic';    // dough-tray selection
     svc._crustBtns = null;       // hit rects, rebuilt each render
+    svc._auto = { sauce: null, cheese: null };  // dispenser/hopper per-order state
+    svc._dialBtns = null;        // calibration chips, rebuilt each render
   },
 
   // owned sauces / crusts in canonical order
@@ -179,6 +181,85 @@ export const Build = {
     // hold-to-pour: coverage grows from the centre while held
     if (svc.stage === 'sauce' && svc._pouring && pz) this._updateSaucePour(svc, dt);
     if (svc.stage === 'cheese' && svc._pouring && pz) this._updateCheesePour(svc, dt);
+
+    // tier-4 automation: the dispenser/hopper pours to its dial, then waits
+    this._updateAuto(svc, dt);
+  },
+
+  // Auto-dispenser (ladle t4) & cheese hopper (shaker t4): a beat after the
+  // stage opens, the machine pours to its calibrated band and stops. It even
+  // grabs the right sauce pot for the ticket — that's what you paid for.
+  // Top up by hand any time; NEXT confirms.
+  _updateAuto(svc, dt) {
+    const pz = svc.pizza;
+    if (!pz || !svc.ticket) return;
+    const A = BAL.AUTO;
+
+    if (svc.stage === 'sauce' && svc.state.upgrades.ladle >= 4) {
+      if (!svc._auto.sauce) {
+        svc._auto.sauce = { delay: 0.55, target: null, active: false };
+      }
+      const a = svc._auto.sauce;
+      if (a.delay > 0 && !svc._pouring) {
+        a.delay -= dt;
+        if (a.delay <= 0 && pz.sauceCoverage <= 0.5) {
+          const [lo, hi] = BAL.SCORE.BANDS[svc.state.dials.sauce];
+          const jit = (Math.random() * 2 - 1) * A.TARGET_JITTER * (hi - lo);
+          a.target = clamp((lo + hi) / 2 + jit, 0, 100);
+          a.active = true;
+          pz.sauceType = svc.ticket.sauceType || 'tomato';   // reads the ticket
+          svc.sauceSel = pz.sauceType;
+          Sfx.sauceStart();
+        }
+      }
+      if (a.active) {
+        if (svc._pouring) { a.active = false; Sfx.sauceStop(); return; }  // hand takes over
+        const rate = BAL.POUR.SAUCE_RATE[svc.state.upgrades.ladle] * A.POUR_RATE_MULT;
+        svc._pourCov = clamp(svc._pourCov + rate * 100 * dt, 0, a.target);
+        pz.sauceCoverage = svc._pourCov;
+        this._paintSauce(svc, pz);
+        this._bandFeedback(svc, Score.bandOf(svc.ticket, 'sauce'), svc._pourCov);
+        if (svc._pourCov >= a.target - 0.01) {
+          a.active = false;
+          Sfx.sauceStop();
+          Juice.floatText(PIZZA_POS.x, PIZZA_POS.y - pz.R - 44, 'Dispensed — top up or NEXT', { color: '#c9b6f2', size: 15 });
+        }
+      }
+    }
+
+    if (svc.stage === 'cheese' && svc.state.upgrades.shaker >= 4) {
+      if (!svc._auto.cheese) {
+        svc._auto.cheese = { delay: 0.55, target: null, active: false };
+      }
+      const a = svc._auto.cheese;
+      if (a.delay > 0 && !svc._pouring) {
+        a.delay -= dt;
+        if (a.delay <= 0 && pz.cheese.length === 0) {
+          const [lo, hi] = BAL.SCORE.BANDS[svc.state.dials.cheese];
+          const jit = (Math.random() * 2 - 1) * A.TARGET_JITTER * (hi - lo);
+          a.target = clamp((lo + hi) / 2 + jit, 0, 100);
+          a.active = true;
+        }
+      }
+      if (a.active) {
+        if (svc._pouring) { a.active = false; return; }
+        const rate = BAL.POUR.CHEESE_RATE[svc.state.upgrades.shaker] * A.POUR_RATE_MULT;
+        svc._cheeseAcc += rate * dt;
+        const full = BAL.PIZZA.CHEESE_FULL * BAL.PIZZA.SIZE_FACTOR[pz.size];
+        while (svc._cheeseAcc >= 1 && Score.cheesePct(pz) < a.target) {
+          svc._cheeseAcc -= 1;
+          const fillFrac = clamp(pz.cheese.length / full, 0, 1);
+          const r = pz.R * 0.85 * Math.sqrt(Math.random()) * (0.4 + 0.6 * fillFrac);
+          const ang = rand(0, Math.PI * 2);
+          this._dropCheese(svc, Math.cos(ang) * r, Math.sin(ang) * r);
+        }
+        this._bandFeedback(svc, Score.bandOf(svc.ticket, 'cheese'), Score.cheesePct(pz));
+        if (Score.cheesePct(pz) >= a.target) {
+          a.active = false;
+          Juice.floatText(PIZZA_POS.x, PIZZA_POS.y - pz.R - 44, 'Hopper done — top up or NEXT', { color: '#c9b6f2', size: 15 });
+        }
+      }
+    }
   },
 
   // current amount % for the active pour stage (drives gauge + band logic)
@@ -304,6 +385,17 @@ export const Build = {
       return;
     }
 
+    // dispenser/hopper dial chips work at any stage
+    if (svc._dialBtns) {
+      for (const db of svc._dialBtns) {
+        if (x >= db.x && x <= db.x + db.w && y >= db.y && y <= db.y + db.h) {
+          svc.state.dials[db.which] = db.key;
+          Sfx.tick();
+          return;
+        }
+      }
+    }
+
     if (st === 'dough') {
       // crust selector chips above the tray
       if (svc._crustBtns) {
@@ -314,6 +406,17 @@ export const Build = {
             return;
           }
         }
+      }
+      // proofer: the whole tray is one confirm-click for the ticket's size
+      if (svc.state.upgrades.proofer >= 1 && svc.ticket
+          && x >= TRAY.x - 8 && x <= TRAY.x + TRAY.w + 8
+          && y >= TRAY.y - 6 && y <= TRAY.y + TRAY.h + 10) {
+        if (svc.ticket.size === 'L' && !svc.state.sizeL) return;
+        Sfx.press();
+        svc.stage = 'doughdrop';
+        this.useBasic(svc, 'dough');
+        this.spawnDough(svc, svc.ticket.size);
+        return;
       }
       for (const b of DOUGH_BALLS) {
         if (dist(x, y, b.x, b.y) < b.r + 14) {
@@ -700,13 +803,27 @@ export const Build = {
     rr(ctx, TRAY.x + 7, TRAY.y + 7, TRAY.w - 14, TRAY.h - 14, 9);
     ctx.fillStyle = '#b98350'; ctx.fill();
 
+    const proofed = svc.state.upgrades.proofer >= 1 && active && svc.ticket
+      ? svc.ticket.size : null;
     for (const b of DOUGH_BALLS) {
       const locked = b.size === 'L' && !svc.state.sizeL;
       const hov = svc._doughHover === b.size && active && !locked;
       const lift = hov ? -5 : 0;
       const r = b.r * (hov ? 1.12 : 1);
       ctx.save();
-      ctx.globalAlpha *= locked ? 0.45 : 1;
+      ctx.globalAlpha *= locked ? 0.45 : proofed && proofed !== b.size ? 0.35 : 1;
+      // the proofer's ready base glows — one click, no misreads
+      if (proofed === b.size) {
+        ctx.globalAlpha = 0.6 + 0.3 * Math.sin(svc.elapsed * 6);
+        ctx.strokeStyle = '#9fe07c';
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(b.x, b.y + lift, r + 8, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#9fe07c';
+        ctx.font = '900 10px Trebuchet MS, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('PROOFED ✓', b.x, b.y + lift - r - 12);
+      }
       // ball
       ctx.fillStyle = '#f5e2b4';
       ctx.beginPath(); ctx.arc(b.x, b.y + lift, r, 0, Math.PI * 2); ctx.fill();
@@ -832,6 +949,36 @@ export const Build = {
     }
     ctx.globalAlpha = svc.stage === 'cheese' ? 1 : 0.85;
     this._stockChip(svc, ctx, 'cheese', CHEESE_BOX.x - 21, CHEESE_BOX.y - CHEESE_BOX.h / 2 - 26);
+    ctx.restore();
+
+    // tier-4 calibration dials (L/N/H) beside their stations
+    svc._dialBtns = [];
+    if (svc.state.upgrades.ladle >= 4) {
+      this._renderDial(svc, ctx, 'sauce', SAUCE_POT.x + SAUCE_POT.r + 10, SAUCE_POT.y - 32);
+    }
+    if (svc.state.upgrades.shaker >= 4) {
+      this._renderDial(svc, ctx, 'cheese', CHEESE_BOX.x + CHEESE_BOX.w / 2 + 8, CHEESE_BOX.y - 32);
+    }
+  },
+
+  // a tiny L/N/H calibration column — the auto machines aim at this band
+  _renderDial(svc, ctx, which, x, y) {
+    const cur = svc.state.dials[which];
+    ctx.save();
+    ctx.font = '900 10px Trebuchet MS, system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#c9b6f2';
+    ctx.fillText('AUTO', x + 11, y - 9);
+    ['light', 'normal', 'heavy'].forEach((key, i) => {
+      const bx = x, by = y + i * 21, w = 22, h = 18;
+      svc._dialBtns.push({ which, key, x: bx, y: by, w, h });
+      rr(ctx, bx, by, w, h, 6);
+      ctx.fillStyle = cur === key ? '#8a54c9' : '#e6d3ac';
+      ctx.fill();
+      ctx.lineWidth = 2.5; ctx.strokeStyle = OUTLINE; ctx.stroke();
+      ctx.fillStyle = cur === key ? '#fff' : '#4a2e1d';
+      ctx.fillText(key[0].toUpperCase(), bx + w / 2, by + h / 2 + 0.5);
+    });
     ctx.restore();
   },
 

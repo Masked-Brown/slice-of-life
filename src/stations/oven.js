@@ -1,6 +1,9 @@
 // =====================================================================
 // oven.js — slide the pizza in, watch the bake meter, pull it at the
-// right moment. While baking, nothing else can be done: tension by design.
+// right moment. One slot: baking locks you out (tension by design).
+// With the SECOND OVEN (V3 flagship) there are two slots with their own
+// meters and alarms — the customer steps aside, the next order starts,
+// and late-game rhythm becomes orchestration.
 // =====================================================================
 
 import { BAL } from '../balance.js';
@@ -13,19 +16,39 @@ const OUTLINE = '#4a2e1d';
 // layout
 export const OVEN = { x: 952, y: 212, w: 286, h: 296 };
 const MOUTH = { x: OVEN.x + 30, y: OVEN.y + 96, w: OVEN.w - 60, h: 150 };
-const METER = { x: OVEN.x + 8, y: OVEN.y - 44, w: OVEN.w - 16, h: 26 };
-
+const METER_H = 26;
 const ZONE_NAMES = ['raw', 'light', 'normal', 'well', 'burnt'];
 const ZONE_COLORS = { raw: '#e9dcb8', light: '#ecc170', normal: '#cf8a3c', well: '#8d5a25', burnt: '#b03a2a' };
+
+function makeSlot() {
+  return {
+    has: false, prog: 0, door: 0,      // door 0 closed → 1 open
+    chimed: false, urgT: 0, smokeT: 0, alarmed: false,
+    pizza: null, ticket: null, cust: null, side: null,
+    orderGrades: null, splats: 0,
+  };
+}
 
 export const Oven = {
 
   resetDay(svc) {
-    svc.oven = {
-      has: false, prog: 0, door: 0,      // door 0 closed → 1 open
-      chimed: false, urgT: 0, smokeT: 0, glowPulse: 0,
-      steamT: 0,
-    };
+    const dual = svc.state.upgrades.oven2 > 0;
+    svc.ovens = dual ? [makeSlot(), makeSlot()] : [makeSlot()];
+    svc.passOrder = null;              // { pizza, ticket, cust, side, ... } on the pass
+    svc.glowPulse = 0;
+    svc.ovenSteamT = 0;
+  },
+
+  dual(svc) { return svc.ovens.length > 1; },
+
+  // slot mouth rects (single: the whole mouth; dual: split left/right)
+  mouths(svc) {
+    if (!this.dual(svc)) return [{ ...MOUTH }];
+    const w = (MOUTH.w - 14) / 2;
+    return [
+      { x: MOUTH.x, y: MOUTH.y, w, h: MOUTH.h },
+      { x: MOUTH.x + w + 14, y: MOUTH.y, w, h: MOUTH.h },
+    ];
   },
 
   // zone boundaries 0..1 — oven tier visibly widens light/normal/well
@@ -33,7 +56,6 @@ export const Oven = {
     const Z = BAL.OVEN.ZONES, w = BAL.OVEN.ZONE_WIDEN * tier;
     const raw = Math.max(0.1, Z.raw - w * 1.5);
     const well = Math.min(0.96, Z.well + w * 1.5);
-    // interior bounds keep their relative proportions inside [raw, well]
     const span = Z.well - Z.raw;
     const light = raw + (Z.light - Z.raw) / span * (well - raw);
     const normal = raw + (Z.normal - Z.raw) / span * (well - raw);
@@ -55,41 +77,80 @@ export const Oven = {
   },
 
   ovenHit(x, y) {
-    return x >= OVEN.x && x <= OVEN.x + OVEN.w && y >= METER.y && y <= OVEN.y + OVEN.h;
+    const meterTop = OVEN.y - 44 - (METER_H + 8);   // generous with two meters
+    return x >= OVEN.x && x <= OVEN.x + OVEN.w && y >= meterTop && y <= OVEN.y + OVEN.h;
   },
 
-  // pizza enters the oven
+  // which slot a click lands on (dual: split by mouth halves; single: slot 0)
+  slotAt(svc, x) {
+    if (!this.dual(svc)) return 0;
+    return x < MOUTH.x + MOUTH.w / 2 ? 0 : 1;
+  },
+
+  freeSlot(svc) {
+    return svc.ovens.findIndex(s => !s.has);
+  },
+
+  // pizza enters a free slot
   insert(svc) {
-    const pz = svc.pizza, ov = svc.oven;
-    if (ov.has || !pz) return;
-    ov.has = true; ov.prog = 0; ov.chimed = false; ov.urgT = 0; ov.smokeT = 0;
+    const pz = svc.pizza;
+    if (!pz) return;
+    const idx = this.freeSlot(svc);
+    if (idx < 0) return;
+    const slot = svc.ovens[idx];
+    const dual = this.dual(svc);
+    const mouth = this.mouths(svc)[idx];
+
+    slot.has = true; slot.prog = 0; slot.chimed = false;
+    slot.urgT = 0; slot.smokeT = 0; slot.alarmed = false;
+    slot.pizza = pz;
+    slot.ticket = svc.ticket;
+    slot.side = svc.side;
+    slot.orderGrades = svc.orderGrades;
+    slot.splats = svc.splatCount;
     pz.state = 'oven';
-    svc.stage = 'baking';
+
     Sfx.ovenDoor();
-    Juice.tween({ target: ov, to: { door: 1 }, dur: 0.2, ease: Ease.outCubic });
+    Juice.tween({ target: slot, to: { door: 1 }, dur: 0.2, ease: Ease.outCubic });
     Juice.tween({
-      target: pz, to: { x: MOUTH.x + MOUTH.w / 2, y: MOUTH.y + MOUTH.h / 2 - 2, scale: 0.66 },
+      target: pz,
+      to: { x: mouth.x + mouth.w / 2, y: mouth.y + mouth.h / 2 - 2, scale: dual ? 0.48 : 0.66 },
       dur: 0.35, ease: Ease.outCubic,
       onDone: () => {
         Sfx.ovenStart();
         // door drops to a low lip so the pizza stays visible while it bakes
-        Juice.tween({ target: ov, to: { door: 0.68 }, dur: 0.25, ease: Ease.outCubic });
+        Juice.tween({ target: slot, to: { door: 0.68 }, dur: 0.25, ease: Ease.outCubic });
         svc.onBakeStart();
       },
     });
+
+    if (dual && svc.canOverlap()) {
+      // the flagship move: this order steps aside, the counter frees up
+      svc.onOrderParkedInOven(slot);
+    } else {
+      svc.stage = 'baking';
+    }
   },
 
-  pull(svc) {
-    const pz = svc.pizza, ov = svc.oven;
-    if (!ov.has || !pz) return;
-    ov.has = false;
-    Sfx.ovenStop();
+  // pull a slot's pizza to the pass (the pass holds one pizza at a time)
+  pull(svc, idx = 0) {
+    const slot = svc.ovens[idx];
+    if (!slot || !slot.has) return;
+    if (svc.passOrder) {
+      Juice.floatText(svc.pass.x, svc.pass.y - 60, 'Pass is full — ring the bell!', { color: '#ff9b80', size: 16 });
+      Sfx.popOff();
+      return;
+    }
+    const pz = slot.pizza;
+    slot.has = false;
+    const anyBaking = svc.ovens.some(s => s.has);
+    if (!anyBaking) Sfx.ovenStop();
     Sfx.ovenDoor();
     Sfx.steamHiss();
     const tier = svc.state.upgrades.oven;
-    pz.bakeZone = this.zoneOf(ov.prog, tier);
+    pz.bakeZone = this.zoneOf(slot.prog, tier);
     pz.zonesAtPull = this.zones(tier);        // "extra well-done" reads the depth
-    Juice.tween({ target: ov, to: { door: 1 }, dur: 0.16, ease: Ease.outCubic });
+    Juice.tween({ target: slot, to: { door: 1 }, dur: 0.16, ease: Ease.outCubic });
     Juice.steam(pz.x, pz.y - 20, 6);
     if (pz.bakeZone === 'burnt') {
       Juice.shake(7, 0.4);           // the ONLY screen shake in the game
@@ -97,65 +158,82 @@ export const Oven = {
     }
     // slide to the pass
     pz.state = 'pass';
+    svc.passOrder = {
+      pizza: pz, ticket: slot.ticket, cust: slot.cust, side: slot.side,
+      orderGrades: slot.orderGrades, splats: slot.splats,
+    };
+    slot.pizza = null; slot.ticket = null; slot.cust = null; slot.side = null;
     Juice.tween({
       target: pz, to: { x: svc.pass.x, y: svc.pass.y, scale: 0.8 },
       dur: 0.45, ease: Ease.outBack,
-      onDone: () => Juice.tween({ target: ov, to: { door: 0 }, dur: 0.3 }),
+      onDone: () => Juice.tween({ target: slot, to: { door: 0 }, dur: 0.3 }),
     });
-    svc.onBakeDone();
+    svc.onBakeDone(idx, this.dual(svc));
   },
 
   update(svc, dt) {
-    const ov = svc.oven;
-    ov.glowPulse += dt;
+    svc.glowPulse += dt;
 
     // ambient steam from the oven top
-    ov.steamT -= dt;
-    if (ov.steamT <= 0) {
-      ov.steamT = rand(0.9, 2.2);
+    svc.ovenSteamT -= dt;
+    if (svc.ovenSteamT <= 0) {
+      svc.ovenSteamT = rand(0.9, 2.2);
       Juice.steam(OVEN.x + rand(40, OVEN.w - 40), OVEN.y + 6, 1);
     }
 
-    if (!ov.has) return;
     const tier = svc.state.upgrades.oven;
-    const crustMult = svc.pizza && BAL.CRUSTS[svc.pizza.crust] ? BAL.CRUSTS[svc.pizza.crust].bakeMult : 1;
-    ov.prog = Math.min(1, ov.prog + dt / (BAL.OVEN.BAKE_TIME[tier] * crustMult));
-    if (svc.pizza) svc.pizza.bake = ov.prog;
+    const dual = this.dual(svc);
+    svc.ovens.forEach((slot, idx) => {
+      if (!slot.has) return;
+      const pz = slot.pizza;
+      const crustMult = pz && BAL.CRUSTS[pz.crust] ? BAL.CRUSTS[pz.crust].bakeMult : 1;
+      slot.prog = Math.min(1, slot.prog + dt / (BAL.OVEN.BAKE_TIME[tier] * crustMult));
+      if (pz) pz.bake = slot.prog;
 
-    const z = this.zones(tier);
-    const want = svc.ticket ? svc.ticket.bake : 'normal';
+      const z = this.zones(tier);
+      const want = slot.ticket ? slot.ticket.bake : 'normal';
 
-    // soft chime when entering the ticket's target zone
-    if (!ov.chimed && this.zoneOf(ov.prog, tier) === want) {
-      ov.chimed = true;
-      Sfx.zoneChime();
-      Juice.floatText(METER.x + METER.w / 2, METER.y - 18, 'now!', { color: '#9fe07c', size: 17 });
-    }
-
-    // rising urgency ticks near burnt
-    const toBurn = z.well - ov.prog;
-    if (toBurn < BAL.OVEN.URGENCY_FROM && toBurn > -0.05) {
-      ov.urgT -= dt;
-      if (ov.urgT <= 0) {
-        ov.urgT = lerp(0.12, 0.4, clamp(toBurn / BAL.OVEN.URGENCY_FROM, 0, 1));
-        Sfx.urgency();
+      // chime + (dual) alarm when entering this slot's target zone
+      if (!slot.chimed && this.zoneOf(slot.prog, tier) === want) {
+        slot.chimed = true;
+        Sfx.zoneChime();
+        if (dual) {
+          Sfx.alarm();
+          Juice.floatText(OVEN.x + OVEN.w / 2, OVEN.y - 66 - idx * 30,
+            `SLOT ${idx + 1} READY!`, { color: '#9fe07c', size: 18 });
+        } else {
+          Juice.floatText(OVEN.x + OVEN.w / 2, OVEN.y - 62, 'now!', { color: '#9fe07c', size: 17 });
+        }
       }
-    }
 
-    // smoking when burnt
-    if (ov.prog >= z.well) {
-      ov.smokeT -= dt;
-      if (ov.smokeT <= 0) {
-        ov.smokeT = 0.3;
-        Juice.smoke(MOUTH.x + MOUTH.w / 2 + rand(-30, 30), MOUTH.y + 10, 2);
+      // rising urgency ticks near burnt
+      const toBurn = z.well - slot.prog;
+      if (toBurn < BAL.OVEN.URGENCY_FROM && toBurn > -0.05) {
+        slot.urgT -= dt;
+        if (slot.urgT <= 0) {
+          slot.urgT = lerp(0.12, 0.4, clamp(toBurn / BAL.OVEN.URGENCY_FROM, 0, 1));
+          Sfx.urgency();
+        }
       }
-    }
+
+      // smoking when burnt
+      if (slot.prog >= z.well) {
+        if (!slot.alarmed && dual) { slot.alarmed = true; Sfx.alarm(); Sfx.alarm(); }
+        slot.smokeT -= dt;
+        if (slot.smokeT <= 0) {
+          slot.smokeT = 0.3;
+          const mouth = this.mouths(svc)[idx];
+          Juice.smoke(mouth.x + mouth.w / 2 + rand(-20, 20), mouth.y + 10, 2);
+        }
+      }
+    });
   },
 
   render(svc, ctx) {
-    const ov = svc.oven;
     const tier = svc.state.upgrades.oven;
-    const active = svc.stage === 'tooven' || svc.stage === 'baking';
+    const dual = this.dual(svc);
+    const anyHot = svc.ovens.some(s => s.has);
+    const active = svc.stage === 'tooven' || svc.stage === 'baking' || anyHot;
 
     ctx.save();
 
@@ -177,75 +255,90 @@ export const Oven = {
       ctx.restore();
     }
 
-    // mouth interior with heat glow
-    ctx.save();
-    rr(ctx, MOUTH.x, MOUTH.y, MOUTH.w, MOUTH.h, MOUTH.h / 2.4);
-    ctx.clip();
-    const heat = ov.has ? 1 : 0.45;
-    const flick = 0.85 + 0.15 * Math.sin(ov.glowPulse * 9) * Math.sin(ov.glowPulse * 5.3);
-    const grad = ctx.createRadialGradient(
-      MOUTH.x + MOUTH.w / 2, MOUTH.y + MOUTH.h, 10,
-      MOUTH.x + MOUTH.w / 2, MOUTH.y + MOUTH.h * 0.7, MOUTH.w * 0.7);
-    grad.addColorStop(0, `rgba(255,${Math.round(150 * flick)},40,${0.95 * heat})`);
-    grad.addColorStop(0.55, `rgba(190,70,20,${0.8 * heat})`);
-    grad.addColorStop(1, 'rgba(40,16,8,1)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(MOUTH.x, MOUTH.y, MOUTH.w, MOUTH.h);
+    // mouths (one wide, or two side by side)
+    this.mouths(svc).forEach((mouth, idx) => {
+      const slot = svc.ovens[idx];
+      ctx.save();
+      rr(ctx, mouth.x, mouth.y, mouth.w, mouth.h, mouth.h / 2.4);
+      ctx.clip();
+      const heat = slot.has ? 1 : 0.45;
+      const flick = 0.85 + 0.15 * Math.sin(svc.glowPulse * 9 + idx * 2) * Math.sin(svc.glowPulse * 5.3);
+      const grad = ctx.createRadialGradient(
+        mouth.x + mouth.w / 2, mouth.y + mouth.h, 10,
+        mouth.x + mouth.w / 2, mouth.y + mouth.h * 0.7, mouth.w * 0.7);
+      grad.addColorStop(0, `rgba(255,${Math.round(150 * flick)},40,${0.95 * heat})`);
+      grad.addColorStop(0.55, `rgba(190,70,20,${0.8 * heat})`);
+      grad.addColorStop(1, 'rgba(40,16,8,1)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(mouth.x, mouth.y, mouth.w, mouth.h);
 
-    // pizza inside (drawn through the mouth, slightly tinted by heat)
-    if (ov.has && svc.pizza) {
-      Build.drawPizza(ctx, svc.pizza);
-      ctx.fillStyle = `rgba(255,120,30,${0.12 + 0.05 * Math.sin(ov.glowPulse * 7)})`;
-      ctx.fillRect(MOUTH.x, MOUTH.y, MOUTH.w, MOUTH.h);
-      // heat shimmer lines
-      ctx.strokeStyle = 'rgba(255,200,120,0.18)';
-      ctx.lineWidth = 2;
-      for (let i = 0; i < 3; i++) {
-        const sx = MOUTH.x + 40 + i * (MOUTH.w - 80) / 2;
-        ctx.beginPath();
-        for (let yy = 0; yy <= 30; yy += 5) {
-          const px = sx + Math.sin(ov.glowPulse * 6 + yy * 0.4 + i * 2) * 4;
-          yy === 0 ? ctx.moveTo(px, MOUTH.y + 14 + yy) : ctx.lineTo(px, MOUTH.y + 14 + yy);
+      if (slot.has && slot.pizza) {
+        Build.drawPizza(ctx, slot.pizza);
+        ctx.fillStyle = `rgba(255,120,30,${0.12 + 0.05 * Math.sin(svc.glowPulse * 7)})`;
+        ctx.fillRect(mouth.x, mouth.y, mouth.w, mouth.h);
+        // heat shimmer lines
+        ctx.strokeStyle = 'rgba(255,200,120,0.18)';
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 3; i++) {
+          const sx = mouth.x + mouth.w * 0.2 + i * mouth.w * 0.3;
+          ctx.beginPath();
+          for (let yy = 0; yy <= 30; yy += 5) {
+            const px = sx + Math.sin(svc.glowPulse * 6 + yy * 0.4 + i * 2) * 4;
+            yy === 0 ? ctx.moveTo(px, mouth.y + 14 + yy) : ctx.lineTo(px, mouth.y + 14 + yy);
+          }
+          ctx.stroke();
         }
-        ctx.stroke();
       }
-    }
-    ctx.restore();
+      ctx.restore();
 
-    // door (slides up when open)
-    const doorH = MOUTH.h * (1 - ov.door * 0.92);
-    if (doorH > 4) {
-      rr(ctx, MOUTH.x - 6, MOUTH.y + MOUTH.h - doorH, MOUTH.w + 12, doorH, 10);
-      ctx.fillStyle = '#5d3a22'; ctx.fill();
-      ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE; ctx.stroke();
-      // handle
-      rr(ctx, MOUTH.x + MOUTH.w / 2 - 30, MOUTH.y + MOUTH.h - doorH + 10, 60, 9, 5);
-      ctx.fillStyle = '#c9a36a'; ctx.fill();
-    }
+      // door (slides up when open)
+      const doorH = mouth.h * (1 - slot.door * 0.92);
+      if (doorH > 4) {
+        rr(ctx, mouth.x - 4, mouth.y + mouth.h - doorH, mouth.w + 8, doorH, 10);
+        ctx.fillStyle = '#5d3a22'; ctx.fill();
+        ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE; ctx.stroke();
+        rr(ctx, mouth.x + mouth.w / 2 - 24, mouth.y + mouth.h - doorH + 10, 48, 9, 5);
+        ctx.fillStyle = '#c9a36a'; ctx.fill();
+      }
 
-    // mouth rim
-    rr(ctx, MOUTH.x, MOUTH.y, MOUTH.w, MOUTH.h, MOUTH.h / 2.4);
-    ctx.lineWidth = 5; ctx.strokeStyle = OUTLINE; ctx.stroke();
+      // mouth rim
+      rr(ctx, mouth.x, mouth.y, mouth.w, mouth.h, mouth.h / 2.4);
+      ctx.lineWidth = 5; ctx.strokeStyle = OUTLINE; ctx.stroke();
 
-    // "slide it in" highlight
-    if (svc.stage === 'tooven') {
+      // slot number plate (dual)
+      if (dual) {
+        ctx.fillStyle = '#c9a36a';
+        rr(ctx, mouth.x + mouth.w / 2 - 12, mouth.y - 22, 24, 17, 5);
+        ctx.fill();
+        ctx.lineWidth = 2.5; ctx.stroke();
+        ctx.fillStyle = '#4a2e1d';
+        ctx.font = '900 11px Trebuchet MS, system-ui, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(idx + 1), mouth.x + mouth.w / 2, mouth.y - 13);
+      }
+    });
+
+    // "slide it in" highlight (a free slot glows while a pizza waits)
+    if (svc.stage === 'tooven' && this.freeSlot(svc) >= 0) {
+      const mouth = this.mouths(svc)[this.freeSlot(svc)];
       ctx.globalAlpha = 0.4 + 0.2 * Math.sin(svc.elapsed * 5);
-      rr(ctx, MOUTH.x - 8, MOUTH.y - 8, MOUTH.w + 16, MOUTH.h + 16, MOUTH.h / 2);
+      rr(ctx, mouth.x - 8, mouth.y - 8, mouth.w + 16, mouth.h + 16, mouth.h / 2);
       ctx.lineWidth = 5; ctx.strokeStyle = '#ffd54a'; ctx.stroke();
       ctx.globalAlpha = 1;
     }
 
-    // ---- bake meter ----------------------------------------------------
-    if (active || ov.has) this._renderMeter(svc, ctx, tier);
+    // ---- bake meters (one per slot, stacked) --------------------------
+    svc.ovens.forEach((slot, idx) => {
+      if (active || slot.has) this._renderMeter(svc, ctx, tier, slot, idx);
+    });
 
     ctx.restore();
   },
 
-  _renderMeter(svc, ctx, tier) {
-    const ov = svc.oven;
+  _renderMeter(svc, ctx, tier, slot, idx) {
     const z = this.zones(tier);
-    const want = svc.ticket ? svc.ticket.bake : 'normal';
-    const M = METER;
+    const want = slot.ticket ? slot.ticket.bake : (svc.ticket ? svc.ticket.bake : 'normal');
+    const M = { x: OVEN.x + 8, y: OVEN.y - 44 - idx * (METER_H + 10), w: OVEN.w - 16, h: METER_H };
 
     ctx.save();
     // frame
@@ -260,20 +353,22 @@ export const Oven = {
       ctx.fillRect(x0, M.y, x1 - x0, M.h);
     }
 
-    // target zone glow
-    const wi = ZONE_NAMES.indexOf(want);
-    const tx0 = M.x + bounds[wi] * M.w, tx1 = M.x + bounds[wi + 1] * M.w;
-    ctx.save();
-    ctx.globalAlpha = 0.75 + 0.25 * Math.sin(svc.elapsed * 6);
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = '#ffd54a';
-    rr(ctx, tx0 + 1, M.y - 2, tx1 - tx0 - 2, M.h + 4, 5);
-    ctx.stroke();
-    ctx.restore();
+    // target zone glow (only when this slot has a target)
+    if (slot.has || svc.stage === 'tooven' || svc.stage === 'baking') {
+      const wi = ZONE_NAMES.indexOf(want);
+      const tx0 = M.x + bounds[wi] * M.w, tx1 = M.x + bounds[wi + 1] * M.w;
+      ctx.save();
+      ctx.globalAlpha = 0.75 + 0.25 * Math.sin(svc.elapsed * 6);
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#ffd54a';
+      rr(ctx, tx0 + 1, M.y - 2, tx1 - tx0 - 2, M.h + 4, 5);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // needle
-    if (ov.has || svc.stage !== 'tooven') {
-      const nx = M.x + clamp(ov.prog, 0, 1) * M.w;
+    if (slot.has) {
+      const nx = M.x + clamp(slot.prog, 0, 1) * M.w;
       ctx.fillStyle = '#fffbef';
       ctx.strokeStyle = OUTLINE;
       ctx.lineWidth = 3;
@@ -287,7 +382,6 @@ export const Oven = {
     }
 
     // zone labels
-    ctx.fillStyle = '#fff6e0';
     ctx.font = '800 10px Trebuchet MS, system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const labels = { light: 'LIGHT', normal: 'NORMAL', well: 'WELL', burnt: 'BURNT' };
@@ -299,10 +393,10 @@ export const Oven = {
     }
 
     // PULL hint while in the target zone
-    if (ov.has && this.zoneOf(ov.prog, tier) === want) {
+    if (slot.has && this.zoneOf(slot.prog, tier) === want && !svc.passOrder) {
       ctx.fillStyle = '#9fe07c';
-      ctx.font = '900 15px Trebuchet MS, system-ui, sans-serif';
-      ctx.fillText('CLICK TO PULL!', M.x + M.w / 2, M.y - 16);
+      ctx.font = '900 14px Trebuchet MS, system-ui, sans-serif';
+      ctx.fillText('CLICK TO PULL!', M.x + M.w / 2, M.y - 14);
     }
     ctx.restore();
   },

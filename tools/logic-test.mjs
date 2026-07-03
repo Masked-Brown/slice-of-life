@@ -471,6 +471,28 @@ console.log('archetypes & events & seasons');
   check('other seasons’ recipes hidden', !avail.includes('estiva') && !avail.includes('margheritafresca'));
 }
 
+// ---- 8g. automation arc gating ---------------------------------------------------
+console.log('automation');
+{
+  const s = newGame();
+  check('tier-4 tools exist and gate late', BAL.UPGRADES.ladle.costs.length === 4
+    && unlockLevel('upgradeTier', 'ladle', 4) === 18
+    && unlockLevel('upgradeTier', 'shaker', 4) === 22);
+  check('new equipment lines gate as equipment',
+    unlockLevel('equipment', 'proofer') === 13
+    && unlockLevel('equipment', 'oven2') === 25
+    && unlockLevel('equipment', 'rail') === 27);
+  check('dials default to light (top-up strategy)',
+    s.dials.sauce === 'light' && s.dials.cheese === 'light');
+  check('pour tables cover tier 4', BAL.POUR.SAUCE_RATE.length >= 5 && BAL.POUR.CHEESE_RATE.length >= 5
+    && BAL.POUR.IN_BAND_SLOW.length >= 5);
+  // migration keeps dials for old saves
+  const m = migrate({ version: 2, day: 3, money: 10, recentRatings: [], upgrades: {},
+    toppings: ['pepperoni', 'mushroom'], sizeL: false, boosts: {}, tutorialDone: true,
+    muted: false, stats: {}, stock: {} });
+  check('migration fills dials', m.dials && m.dials.sauce === 'light');
+}
+
 // ---- 9. XP / level spine ------------------------------------------------------
 console.log('xp & levels');
 {

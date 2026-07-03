@@ -185,7 +185,10 @@ export const ShopScene = {
       const tier = s.upgrades[key];
       const maxed = tier >= u.costs.length;
       const cost = maxed ? null : u.costs[tier];
-      const gate = maxed ? null : unlockLevel('upgradeTier', key, tier + 1);
+      // new equipment lines gate as 'equipment'; extra tiers as 'upgradeTier'
+      const gate = maxed ? null : Math.max(
+        unlockLevel('upgradeTier', key, tier + 1),
+        tier === 0 ? unlockLevel('equipment', key) : 1);
       const lockLevel = gate !== null && s.level < gate ? gate : null;
       const pips = Array.from({ length: u.costs.length }, (_, i) =>
         `<span class="pip ${i < tier ? 'pip-on' : ''}"></span>`).join('');
