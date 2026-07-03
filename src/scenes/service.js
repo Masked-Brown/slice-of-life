@@ -7,8 +7,9 @@
 import { BAL } from '../balance.js';
 import { clamp, lerp, rand, Juice, Ease, rr } from '../juice.js';
 import { Sfx } from '../audio.js';
-import { currentRating, pushRating, saveGame, gbp } from '../state.js';
+import { currentRating, pushRating, saveGame, gbp, refundStock } from '../state.js';
 import { ensureNextDay, checkMilestones, goalProgress } from '../goals.js';
+import { Telemetry } from '../telemetry.js';
 import { Orders } from '../stations/order.js';
 import { Build, PIZZA_POS, TRAY, NEXT_BTN, BINS_Y } from '../stations/build.js';
 import { Oven, OVEN } from '../stations/oven.js';
@@ -106,6 +107,7 @@ export const ServiceScene = {
     state.boosts = { prep: 0, ad: 0 };
     svc.dayStarted = true;
     g.dom.dayboard.classList.add('hidden');
+    Telemetry.log('day_start', { customers: svc.totalCustomers, money: Math.round(state.money) });
     Juice.stamp(640, 300, `DAY ${state.day} — OPEN!`, { color: '#9fe07c', size: 52 });
     Sfx.bell();
   },
@@ -248,6 +250,7 @@ export const ServiceScene = {
       goal.hit = true;
       svc.state.money += goal.reward;
       svc.bonusEarned += goal.reward;
+      Telemetry.log('goal', { id: goal.id });
       const g = svc.game;
       Juice.stamp(640, 270, 'DAILY GOAL!', { color: '#9fe07c', size: 46 });
       Juice.floatText(640, 330, '+' + gbp(goal.reward), { color: '#ffd54a', size: 28 });
@@ -262,6 +265,7 @@ export const ServiceScene = {
     hit.forEach((def, i) => {
       svc.state.money += def.reward;
       svc.bonusEarned += def.reward;
+      Telemetry.log('milestone', { id: def.id });
       Juice.tween({
         dur: 0.01, delay: 0.55 * i,
         onDone: () => {
@@ -297,7 +301,7 @@ export const ServiceScene = {
     }
     // a held piece goes back in its bin; pieces on the binned pizza are spent
     if (svc.held) {
-      svc.state.stock[svc.held.type] = (svc.state.stock[svc.held.type] | 0) + svc.held.n;
+      refundStock(svc.state, svc.held.type, svc.held.n);
     }
     const pz = svc.pizza;
     if (pz) {

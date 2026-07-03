@@ -6,6 +6,7 @@
 import { BAL } from './balance.js';
 import { Juice } from './juice.js';
 import { Sfx } from './audio.js';
+import { Telemetry } from './telemetry.js';
 import { newGame, loadGame, saveGame, hasSave } from './state.js';
 import { TitleScene } from './scenes/title.js';
 import { ServiceScene } from './scenes/service.js';
@@ -156,6 +157,13 @@ function frame(now) {
 
   requestAnimationFrame(frame);
 }
+
+// telemetry context rides along on every event (local only, no PII)
+Telemetry.init(() => ({
+  day: game.state.day,
+  level: game.state.level,
+  screen: game.sceneName,
+}));
 
 game.applyMute();
 game.setScene('title');

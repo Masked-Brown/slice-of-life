@@ -132,24 +132,68 @@ export const BAL = {
 
   // ---- Toppings (menu tab) — display order matters -----------------------
   // cost = unlock price · unit = restock £/piece (before supply discount)
+  // shelf = days a batch keeps before spoiling (V3) · tier = rarity band
   TOPPINGS: {
-    pepperoni: { label: 'Pepperoni', cost: 0,   unit: 0.10, dot: '#d8442e' },
-    mushroom:  { label: 'Mushroom',  cost: 0,   unit: 0.09, dot: '#e8d9bd' },
-    onion:     { label: 'Onion',     cost: 60,  unit: 0.08, dot: '#c39bd3' },
-    olive:     { label: 'Olive',     cost: 95,  unit: 0.12, dot: '#3d4a26' },
-    pepper:    { label: 'Pepper',    cost: 130, unit: 0.12, dot: '#4caf50' },
-    ham:       { label: 'Ham',       cost: 170, unit: 0.16, dot: '#f48fb1' },
-    pineapple: { label: 'Pineapple', cost: 220, unit: 0.18, dot: '#f6c945' },
-    chilli:    { label: 'Chilli',    cost: 280, unit: 0.20, dot: '#e53935' },
+    pepperoni: { label: 'Pepperoni', cost: 0,   unit: 0.10, dot: '#d8442e', shelf: 6, tier: 'common' },
+    mushroom:  { label: 'Mushroom',  cost: 0,   unit: 0.09, dot: '#e8d9bd', shelf: 3, tier: 'common' },
+    onion:     { label: 'Onion',     cost: 60,  unit: 0.08, dot: '#c39bd3', shelf: 5, tier: 'common' },
+    olive:     { label: 'Olive',     cost: 95,  unit: 0.12, dot: '#3d4a26', shelf: 8, tier: 'common' },
+    pepper:    { label: 'Pepper',    cost: 130, unit: 0.12, dot: '#4caf50', shelf: 3, tier: 'common' },
+    ham:       { label: 'Ham',       cost: 170, unit: 0.16, dot: '#f48fb1', shelf: 4, tier: 'common' },
+    pineapple: { label: 'Pineapple', cost: 220, unit: 0.18, dot: '#f6c945', shelf: 3, tier: 'premium' },
+    chilli:    { label: 'Chilli',    cost: 280, unit: 0.20, dot: '#e53935', shelf: 5, tier: 'premium' },
   },
   SIZE_L_COST: 220,
+
+  // ---- Basics (dough / sauce base / cheese) — V3 stocked ingredients ------
+  // Consumed 1 unit per pizza (flat, any size — forecasting stays "units ≈
+  // pizzas"). Never block the build: at 0 stock each use auto-charges an
+  // emergency corner-shop run at EMERGENCY_MULT × unit price.
+  BASICS: {
+    dough:  { label: 'Dough',      unit: 0.30, dot: '#f5e2b4', shelf: 3 },
+    sauce:  { label: 'Sauce base', unit: 0.18, dot: '#c23a1c', shelf: 5 },
+    cheese: { label: 'Mozzarella', unit: 0.26, dot: '#f7d774', shelf: 4 },
+  },
+
+  // ---- Quality grades (V3) -------------------------------------------------
+  // Chosen per graded ingredient in the restock screen; stamps the batches
+  // bought (batches remember their grade — no retroactive switching).
+  // satBonus = satisfaction points per order that consumed that grade.
+  // shelfDelta = premium perishables spoil sooner.
+  GRADES: {
+    budget:   { label: 'Budget',   costMult: 0.7, satBonus: -2, shelfDelta: 0 },
+    standard: { label: 'Standard', costMult: 1.0, satBonus: 0,  shelfDelta: 0 },
+    premium:  { label: 'Premium',  costMult: 1.6, satBonus: 3,  shelfDelta: -1 },
+  },
+  GRADED: ['cheese', 'sauce', 'pepperoni', 'mushroom'],  // which keys have grades
+
+  // ---- Chef XP & levels (V3 progression spine) -----------------------------
+  XP: {
+    BASE: 6,                        // per served order
+    PER_TYPE: 2,                    // + per topping type on the ticket
+    SIZE_BONUS: { S: 0, M: 1, L: 3 },
+    ACC_FLOOR: 0.25,                // xp mult at 0 accuracy…
+    ACC_CURVE: 2.2,                 // …rising as (acc/100)^curve to 1
+    PERFECT_BONUS: 6,               // flat, on a perfect pizza
+    SIDE_BONUS: 3,                  // a served side adds a little
+    GOAL: 14, MILESTONE: 20, EVENT: 18, PREORDER: 8, CRITIC_A: 30,
+    // XP needed to go from level n to n+1 (index 0 = L1→L2). 29 steps → L30.
+    CURVE: [35, 55, 70, 85, 95, 105, 115, 125, 135, 145,
+            155, 160, 165, 170, 175, 180, 185, 190, 195, 200,
+            205, 210, 215, 220, 225, 230, 235, 240, 245],
+    LEVEL_CASH_BASE: 6,             // level-up cash bonus = base + per × level
+    LEVEL_CASH_PER: 2,
+  },
 
   // ---- Stock / restock -----------------------------------------------------
   STOCK: {
     START: 24,                   // starting stock per starter topping
+    START_BASICS: 40,            // starting dough/sauce/cheese units
     NEW_TOPPING_INCLUDED: 20,    // stock included when a topping is unlocked
     LOW_AT: 6,                   // low-stock warning threshold (amber)
+    LOW_AT_BASICS: 8,            // basics warn a little earlier
     BUY_AMOUNTS: [5, 20],        // restock button quantities
+    EMERGENCY_MULT: 2.5,         // basics at 0 stock: auto-charge unit × this
   },
 
   // ---- Daily specials --------------------------------------------------------
@@ -237,3 +281,8 @@ export const BAL = {
 
 // Convenience: ordered topping keys (menu + bin display order)
 export const TOPPING_ORDER = Object.keys(BAL.TOPPINGS);
+
+// Any stocked ingredient's definition (toppings, basics, side stock…)
+export function ING(key) {
+  return BAL.TOPPINGS[key] || BAL.BASICS[key] || (BAL.SIDE_STOCK && BAL.SIDE_STOCK[key]) || null;
+}

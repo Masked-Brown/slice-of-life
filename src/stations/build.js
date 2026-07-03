@@ -6,6 +6,7 @@
 import { BAL, TOPPING_ORDER } from '../balance.js';
 import { clamp, lerp, rand, randi, dist, Juice, Ease, rr } from '../juice.js';
 import { Sfx } from '../audio.js';
+import { consumeStock, refundStock } from '../state.js';
 import { Score } from './serve.js';
 
 // ---- layout (logical px) ----------------------------------------------
@@ -303,7 +304,7 @@ export const Build = {
           const placed = pz ? pz.toppings.filter(t => t.type === bin.type).length : 0;
           if (w != null && w - placed >= 2) n = 2; // double-grab when ≥2 still needed
         }
-        svc.state.stock[bin.type] -= n;
+        consumeStock(svc.state, bin.type, n);
         this._stockWarning(svc, bin.type);
         svc.held = { type: bin.type, x, y, n };
         Sfx.pluck();
@@ -357,15 +358,15 @@ export const Build = {
       const h = svc.held;
       svc.held = null;
       // a piece that misses the pizza goes back in its bin
-      if (!this._placePiece(svc, h.type, x, y)) svc.state.stock[h.type]++;
+      if (!this._placePiece(svc, h.type, x, y)) refundStock(svc.state, h.type);
       if (h.n === 2) {
         // second piece lands beside the first on a free grid point
         const spot = this._freeGhost(svc, x, y, true);
         if (spot) this._placePiece(svc, h.type, pz.x + spot.x, pz.y + spot.y, 0.08);
-        else svc.state.stock[h.type]++;
+        else refundStock(svc.state, h.type);
       }
     } else if (svc.held) {
-      svc.state.stock[svc.held.type] += svc.held.n;
+      refundStock(svc.state, svc.held.type, svc.held.n);
       svc.held = null;
     }
 

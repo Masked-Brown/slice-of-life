@@ -11,6 +11,7 @@ import { Sfx } from '../audio.js';
 import { saveGame, gbp } from '../state.js';
 import { ensureNextDay, checkMilestones } from '../goals.js';
 import { analyticsHTML } from '../analytics.js';
+import { Telemetry } from '../telemetry.js';
 
 let ui = null;
 
@@ -32,6 +33,15 @@ export const DayEndScene = {
     state.carriedRestockSpend = 0;
     const dayProfit = stats.sales + stats.tips + stats.bonus - restockSpend;
     state.stats.bestDayProfit = Math.max(state.stats.bestDayProfit, dayProfit);
+    state.lifetime.days += 1;
+
+    Telemetry.log('day_end', {
+      served: stats.served, lost: stats.lost,
+      sales: Math.round(stats.sales), tips: Math.round(stats.tips),
+      bonus: Math.round(stats.bonus), restockSpend: Math.round(restockSpend * 100) / 100,
+      satAvg: Math.round(stats.satAvg), rating: Math.round(stats.ratingAfter * 10) / 10,
+      money: Math.round(state.money),
+    });
 
     state.day += 1;
     state.phase = 'shop';

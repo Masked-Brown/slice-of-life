@@ -28,8 +28,17 @@ console.log('migration');
   const s = migrate(v1);
   check('v1 save keeps progress', s.day === 6 && s.money === 87.5 && s.stats.lifetimeServed === 41);
   check('owned toppings gain stock', s.stock.onion === BAL.STOCK.START && s.stock.pepperoni === BAL.STOCK.START);
-  check('new fields appear', s.upgrades.supply === 0 && s.carriedRestockSpend === 0 && s.version === 2);
+  check('new fields appear', s.upgrades.supply === 0 && s.carriedRestockSpend === 0 && s.version === 3);
   check('boosts survive', s.boosts.ad === 1);
+  // V3 additions
+  check('basics granted on migration',
+    s.stock.dough === BAL.STOCK.START_BASICS && s.stock.cheese === BAL.STOCK.START_BASICS);
+  check('stock batches seeded in sync', Object.keys(s.stock).every(k =>
+    (s.stockAges[k] || []).reduce((a, b) => a + b.n, 0) === s.stock[k]));
+  check('lifetime backfilled', s.lifetime.served === 41 && s.lifetime.days === 5);
+  check('XP/level backfilled', s.xp > 0 && s.level >= 2);
+  check('meta scaffold present at 1.0', s.meta.mult === 1.0 && s.meta.currency === 0);
+  check('grades default standard', BAL.GRADED.every(k => s.grades[k] === 'standard'));
 }
 
 // ---- 2. supply discounts -----------------------------------------------------

@@ -8,9 +8,10 @@
 import { BAL, TOPPING_ORDER } from '../balance.js';
 import { Juice } from '../juice.js';
 import { Sfx } from '../audio.js';
-import { saveGame, gbp, unitCost } from '../state.js';
+import { saveGame, gbp, unitCost, addStock } from '../state.js';
 import { ensureNextDay, checkMilestones, metrics } from '../goals.js';
 import { analyticsHTML } from '../analytics.js';
+import { Telemetry } from '../telemetry.js';
 
 let ui = null;
 
@@ -107,10 +108,11 @@ export const ShopScene = {
     return card;
   },
 
-  _buy(g, cost, mutate) {
+  _buy(g, cost, mutate, itemLabel = null) {
     if (g.state.money < cost) return;
     g.state.money -= cost;
     mutate();
+    if (itemLabel) Telemetry.log('purchase', { item: itemLabel, cost });
     this._milestoneToasts(g);        // upgrades/toppings can complete milestones
     saveGame(g.state);
     Sfx.buy();
@@ -153,7 +155,7 @@ export const ShopScene = {
         owned: maxed,
         afford: !maxed && s.money >= cost,
         buyLabel: 'UPGRADE',
-        onBuy: () => this._buy(g, cost, () => { s.upgrades[key]++; }),
+        onBuy: () => this._buy(g, cost, () => { s.upgrades[key]++; }, `${key} t${tier + 1}`),
       }));
     }
   },
@@ -168,7 +170,7 @@ export const ShopScene = {
       owned: s.sizeL,
       afford: !s.sizeL && s.money >= BAL.SIZE_L_COST,
       buyLabel: 'UNLOCK',
-      onBuy: () => this._buy(g, BAL.SIZE_L_COST, () => { s.sizeL = true; }),
+      onBuy: () => this._buy(g, BAL.SIZE_L_COST, () => { s.sizeL = true; }, 'size L'),
     }));
     // topping unlocks (come with starter stock)
     for (const key of TOPPING_ORDER) {
@@ -186,8 +188,8 @@ export const ShopScene = {
         buyLabel: 'ADD',
         onBuy: () => this._buy(g, t.cost, () => {
           s.toppings.push(key);
-          s.stock[key] = (s.stock[key] | 0) + BAL.STOCK.NEW_TOPPING_INCLUDED;
-        }),
+          addStock(s, key, BAL.STOCK.NEW_TOPPING_INCLUDED);
+        }, t.label),
       }));
     }
   },
@@ -232,7 +234,7 @@ export const ShopScene = {
         b.addEventListener('click', () => {
           if (s.money < price) return;
           s.money -= price;
-          s.stock[key] = (s.stock[key] | 0) + n;
+          addStock(s, key, n);
           s.carriedRestockSpend += price;
           saveGame(s);
           Sfx.buy();
@@ -262,7 +264,7 @@ export const ShopScene = {
         owned: booked,
         afford: !booked && s.money >= b.cost,
         buyLabel: 'BOOK',
-        onBuy: () => this._buy(g, b.cost, () => { s.boosts[b.key] = 1; }),
+        onBuy: () => this._buy(g, b.cost, () => { s.boosts[b.key] = 1; }, `boost:${b.key}`),
       }));
     }
     grid.appendChild(boostRow);

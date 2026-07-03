@@ -105,9 +105,10 @@ export const Score = {
     const speedK = 1 - over;
     const satisfaction = Math.round(clamp(accuracy * lerp(S.SPEED_FLOOR, 1, speedK), 0, 100));
 
-    // money
+    // money — meta.mult is the prestige scaffold's single economy touchpoint
+    // (1.0 in V3 = no effect); pay, tip and analytics all flow from price
     let price = (E.BASE_PRICE[ticket.size] + E.PRICE_PER_TOPPING_TYPE * ticket.toppings.length)
-      * priceMultiplier(state);
+      * priceMultiplier(state) * (state.meta ? state.meta.mult : 1);
     if (ticket.special) price *= 1 + BAL.SPECIALS.PRICE_PREMIUM;
     const pay = price * lerp(E.SAT_MULT_MIN, E.SAT_MULT_MAX, satisfaction / 100);
     let tipFrac = 0;
@@ -187,8 +188,11 @@ export const Serve = {
     state.money += total;
     state.stats.lifetimeServed++;
     state.stats.lifetimeEarned += total;
+    state.lifetime.served++;
+    state.lifetime.earned += total;
     if (res.perfect) {
       state.stats.lifetimePerfects++;
+      state.lifetime.perfects++;
       state.stats.perfectStreak++;
       state.stats.bestPerfectStreak = Math.max(state.stats.bestPerfectStreak, state.stats.perfectStreak);
     } else {
