@@ -4,10 +4,11 @@
 // =====================================================================
 
 import { BAL, TOPPING_ORDER } from '../src/balance.js';
-import { newGame, migrate, unitCost, currentRating } from '../src/state.js';
+import { newGame, migrate, unitCost, currentRating, levelForXP, xpProgress } from '../src/state.js';
 import { Score } from '../src/stations/serve.js';
 import { Orders } from '../src/stations/order.js';
 import { ensureNextDay, checkMilestones, metrics, goalProgress } from '../src/goals.js';
+import { unlocked, unlockLevel, orderXP, awardXP } from '../src/progress.js';
 
 let failures = 0;
 function check(name, cond, detail = '') {
@@ -162,6 +163,61 @@ console.log('regulars');
   }
   check('regulars appear', seenReg > 0, `(saw ${seenReg})`);
   check('only eligible regulars (no locked toppings/sizes)', bad === 0, `(${bad} bad)`);
+}
+
+// ---- 9. XP / level spine ------------------------------------------------------
+console.log('xp & levels');
+{
+  check('level 1 at 0 XP', levelForXP(0) === 1);
+  check('level 2 exactly at first step', levelForXP(BAL.XP.CURVE[0]) === 2
+    && levelForXP(BAL.XP.CURVE[0] - 1) === 1);
+  const total = BAL.XP.CURVE.reduce((a, b) => a + b, 0);
+  check('curve caps at level 30', BAL.XP.CURVE.length === 29 && levelForXP(total + 999) === 30);
+
+  const s = newGame();
+  const lv = awardXP(s, BAL.XP.CURVE[0] + 5);
+  check('awardXP levels up and pays cash', lv.from === 1 && lv.to === 2 && lv.cash > 0 && s.money > 0);
+  const p = xpProgress(s);
+  check('xpProgress tracks inside the level', p.into === 5 && p.need === BAL.XP.CURVE[1]);
+
+  // accuracy scales order XP hard: perfect ≫ sloppy
+  const ticket = { size: 'M', toppings: [{ type: 'pepperoni', count: 5 }] };
+  const sloppy = orderXP(ticket, { accuracy: 35, perfect: false });
+  const perfect = orderXP(ticket, { accuracy: 100, perfect: true });
+  check('perfect order pays ~3×+ the XP of a sloppy one', perfect / sloppy >= 2.5,
+    `(${sloppy} vs ${perfect})`);
+}
+
+// ---- 10. unlock table -----------------------------------------------------------
+console.log('unlock table');
+{
+  const s = newGame();
+  check('starter content open at level 1',
+    unlocked(s, 'topping', 'pepperoni') && unlocked(s, 'upgradeTier', 'oven', 1));
+  check('onion gated at level 2', !unlocked(s, 'topping', 'onion') && unlockLevel('topping', 'onion') === 2);
+  check('size L gated', !unlocked(s, 'sizeL', 'sizeL'));
+  s.level = 30;
+  check('everything open at level 30', BAL.UNLOCKS.every(u => unlocked(s, u.kind, u.id, u.tier || 1)));
+  const levels = BAL.UNLOCKS.map(u => u.level);
+  check('table spans levels 2–30', Math.min(...levels) === 2 && Math.max(...levels) === 30);
+  // every level from 2..30 carries something early, gaps ≤ 1 until 10
+  const set = new Set(levels);
+  let earlyGaps = true;
+  for (let l = 2; l <= 10; l++) if (!set.has(l)) earlyGaps = false;
+  check('no unlock droughts in the early game', earlyGaps);
+
+  // a V2 save owning late content can never see it locked
+  const v2 = {
+    version: 2, day: 12, money: 50, recentRatings: [4, 4],
+    upgrades: { oven: 1, ladle: 0, shaker: 0, tongs: 0, decor: 0, supply: 0 },
+    toppings: ['pepperoni', 'mushroom', 'chilli'], sizeL: true,
+    boosts: { prep: 0, ad: 0 }, tutorialDone: true, muted: false,
+    stats: { lifetimeServed: 20, lifetimeEarned: 200 },
+    stock: { pepperoni: 5, mushroom: 5, chilli: 5 },
+  };
+  const m = migrate(v2);
+  check('migration clamps level over owned content',
+    m.level >= unlockLevel('topping', 'chilli'), `(level ${m.level})`);
 }
 
 console.log(failures === 0 ? '\nALL LOGIC TESTS PASSED' : `\n${failures} FAILURES`);

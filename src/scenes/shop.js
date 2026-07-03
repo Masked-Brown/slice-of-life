@@ -10,6 +10,7 @@ import { Juice } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { saveGame, gbp, unitCost, addStock } from '../state.js';
 import { ensureNextDay, checkMilestones, metrics } from '../goals.js';
+import { unlocked, unlockLevel } from '../progress.js';
 import { analyticsHTML } from '../analytics.js';
 import { Telemetry } from '../telemetry.js';
 
@@ -40,7 +41,10 @@ export const ShopScene = {
       <div class="shop-panel">
         <div class="shop-head">
           <div class="shop-title">PIZZA SUPPLY CO.</div>
-          <div class="shop-money" id="shop-money">${gbp(g.state.money)}</div>
+          <div class="shop-right">
+            <div class="shop-levelpill">CHEF LV ${g.state.level}</div>
+            <div class="shop-money" id="shop-money">${gbp(g.state.money)}</div>
+          </div>
         </div>
         <div class="shop-banner">📌 Tomorrow's special: ${specialTxt} — expect extra demand, stock up!</div>
         <div class="shop-tabs">
@@ -89,9 +93,12 @@ export const ShopScene = {
     else this._goalsTab(g, grid);
   },
 
-  _card({ title, desc, pips = null, cost = null, owned = false, afford = false, buyLabel = 'BUY', onBuy = null, dot = null }) {
+  // lockLevel: chef level required — a locked card can't be bought, only coveted
+  _card({ title, desc, pips = null, cost = null, owned = false, afford = false, buyLabel = 'BUY', onBuy = null, dot = null, lockLevel = null }) {
     const card = document.createElement('div');
-    card.className = 'shop-card' + (afford && !owned ? ' afford' : '') + (owned ? ' owned' : '');
+    const locked = lockLevel !== null && !owned;
+    card.className = 'shop-card' + (afford && !owned && !locked ? ' afford' : '')
+      + (owned ? ' owned' : '') + (locked ? ' locked' : '');
     card.innerHTML = `
       <div class="sc-title">${dot ? `<span class="tk-dot" style="background:${dot}"></span>` : ''}${title}</div>
       ${pips !== null ? `<div class="sc-pips">${pips}</div>` : ''}
@@ -99,9 +106,11 @@ export const ShopScene = {
       <div class="sc-buy">
         ${owned
           ? `<span class="sc-owned">✓ ${cost === null ? 'OWNED' : 'MAXED'}</span>`
-          : `<button class="btn sc-btn" ${afford ? '' : 'disabled'}>${buyLabel} · ${gbp(cost)}</button>`}
+          : locked
+            ? `<span class="sc-lock">🔒 Chef Level ${lockLevel}</span>`
+            : `<button class="btn sc-btn" ${afford ? '' : 'disabled'}>${buyLabel} · ${gbp(cost)}</button>`}
       </div>`;
-    if (!owned && onBuy) {
+    if (!owned && !locked && onBuy) {
       const btn = card.querySelector('.sc-btn');
       if (btn && afford) btn.addEventListener('click', onBuy);
     }
@@ -145,6 +154,8 @@ export const ShopScene = {
       const tier = s.upgrades[key];
       const maxed = tier >= u.costs.length;
       const cost = maxed ? null : u.costs[tier];
+      const gate = maxed ? null : unlockLevel('upgradeTier', key, tier + 1);
+      const lockLevel = gate !== null && s.level < gate ? gate : null;
       const pips = Array.from({ length: u.costs.length }, (_, i) =>
         `<span class="pip ${i < tier ? 'pip-on' : ''}"></span>`).join('');
       grid.appendChild(this._card({
@@ -155,6 +166,7 @@ export const ShopScene = {
         owned: maxed,
         afford: !maxed && s.money >= cost,
         buyLabel: 'UPGRADE',
+        lockLevel,
         onBuy: () => this._buy(g, cost, () => { s.upgrades[key]++; }, `${key} t${tier + 1}`),
       }));
     }
@@ -163,6 +175,7 @@ export const ShopScene = {
   _menuTab(g, grid) {
     const s = g.state;
     // Size L unlock
+    const lGate = unlockLevel('sizeL', 'sizeL');
     grid.appendChild(this._card({
       title: 'Large Pizzas (L)',
       desc: 'Unlock the big dough. Large orders pay the most — and start appearing on tickets tomorrow.',
@@ -170,13 +183,15 @@ export const ShopScene = {
       owned: s.sizeL,
       afford: !s.sizeL && s.money >= BAL.SIZE_L_COST,
       buyLabel: 'UNLOCK',
+      lockLevel: !s.sizeL && s.level < lGate ? lGate : null,
       onBuy: () => this._buy(g, BAL.SIZE_L_COST, () => { s.sizeL = true; }, 'size L'),
     }));
-    // topping unlocks (come with starter stock)
+    // topping unlocks (come with starter stock); level-locked ones tease
     for (const key of TOPPING_ORDER) {
       const t = BAL.TOPPINGS[key];
       if (t.cost === 0) continue;
       const owned = s.toppings.includes(key);
+      const gate = unlockLevel('topping', key);
       grid.appendChild(this._card({
         title: t.label,
         dot: t.dot,
@@ -186,6 +201,7 @@ export const ShopScene = {
         owned,
         afford: !owned && s.money >= t.cost,
         buyLabel: 'ADD',
+        lockLevel: !owned && s.level < gate ? gate : null,
         onBuy: () => this._buy(g, t.cost, () => {
           s.toppings.push(key);
           addStock(s, key, BAL.STOCK.NEW_TOPPING_INCLUDED);

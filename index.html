@@ -26,6 +26,10 @@
 
         <!-- In-game HUD -->
         <div id="ui-hud" class="hidden">
+          <div class="hud-pill hud-level" id="hud-level" title="Chef level">
+            <span id="hud-level-num">LV 1</span>
+            <span class="xp-bar"><i id="hud-xp-fill"></i></span>
+          </div>
           <div class="hud-pill" id="hud-day">Day 1</div>
           <div class="hud-pill hud-money" id="hud-money">£0.00</div>
           <div class="hud-pill hud-rating">
@@ -48,6 +52,9 @@
 
         <!-- Day-start board: specials, goal, stock check -->
         <div id="ui-dayboard" class="ui-screen hidden"></div>
+
+        <!-- Level-up NEW UNLOCK reveal card -->
+        <div id="ui-levelup" class="ui-screen hidden"></div>
 
         <!-- Day end receipt -->
         <div id="ui-dayend" class="ui-screen hidden"></div>

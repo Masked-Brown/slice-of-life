@@ -9,6 +9,7 @@ import { clamp, lerp, rand, Juice, Ease, rr } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { currentRating, pushRating, saveGame, gbp, refundStock } from '../state.js';
 import { ensureNextDay, checkMilestones, goalProgress } from '../goals.js';
+import { awardXP, celebrateLevelUp, xpFrac } from '../progress.js';
 import { Telemetry } from '../telemetry.js';
 import { Orders } from '../stations/order.js';
 import { Build, PIZZA_POS, TRAY, NEXT_BTN, BINS_Y } from '../stations/build.js';
@@ -67,6 +68,8 @@ export const ServiceScene = {
       lowWarned: {}, outWarned: {},           // one stock warning per topping per day
       goal: { ...plan.goal, hit: false, failed: false },
       bonusEarned: 0,                         // goal + milestone cash won today
+      xpToday: 0,
+      paused: false,                          // level-up card freezes the floor
       largeSold: 0, perfectsToday: 0, underPar: 0, usedTypes: new Set(),
       prepLeft: 0,
       ratingAtStart: currentRating(state),
@@ -84,6 +87,7 @@ export const ServiceScene = {
       onBakeStart: () => this._setTutorial('oven'),
       onBakeDone: () => this._onBakeDone(),
       onOrderDone: res => this._onOrderDone(res),
+      onXP: (amount, x, y) => this._onXP(amount, x, y),
       advanceStage: () => this._advanceStage(),
     };
     svc.totalCustomers = 0;
@@ -256,6 +260,7 @@ export const ServiceScene = {
       Juice.floatText(640, 330, '+' + gbp(goal.reward), { color: '#ffd54a', size: 28 });
       Juice.coinBurst(640, 300, g.hudMoneyPos.x, g.hudMoneyPos.y, 8, () => Sfx.coin());
       Sfx.goalDing();
+      this._onXP(BAL.XP.GOAL, 640, 356);
     }
   },
 
@@ -275,9 +280,25 @@ export const ServiceScene = {
           Juice.coinBurst(640, 250, g.hudMoneyPos.x, g.hudMoneyPos.y, 10, () => Sfx.coin());
           Juice.confetti(640, 235, 22);
           Sfx.fanfare();
+          this._onXP(BAL.XP.MILESTONE, 640, 330);
         },
       });
     });
+  },
+
+  // every XP grant flows through here: bank it, float it, catch level-ups
+  _onXP(amount, x = 640, y = 330) {
+    if (!svc) return;
+    svc.xpToday += amount;
+    const lv = awardXP(svc.state, amount);
+    Juice.floatText(x, y, `+${amount} XP`, { color: '#c99bf0', size: 20 });
+    const d = svc.game.dom.hudLevel;
+    d.classList.remove('hud-level-hot'); void d.offsetWidth; d.classList.add('hud-level-hot');
+    if (lv.to > lv.from) {
+      svc.paused = true;                 // freeze the floor for the moment
+      const g = svc.game;
+      celebrateLevelUp(g, lv, () => { if (g._svc) g._svc.paused = false; });
+    }
   },
 
   _onStormOut(c, wasFront) {
@@ -332,6 +353,8 @@ export const ServiceScene = {
 
   update(g, dt) {
     if (!svc) return;
+    // level-up card up: the whole floor holds its breath (patience included)
+    if (svc.paused) { this._updateHUD(); return; }
     svc.elapsed += dt;
 
     Orders.update(svc, dt);
@@ -344,7 +367,7 @@ export const ServiceScene = {
   },
 
   _checkDayEnd(g) {
-    if (svc.dayEndQueued) return;
+    if (svc.dayEndQueued || svc.paused) return;
     if (svc.pending.length === 0 && svc.customers.length === 0 && svc.stage === 'idle'
         && (svc.served + svc.lost) >= svc.totalCustomers && svc.totalCustomers > 0) {
       svc.dayEndQueued = true;
@@ -358,6 +381,7 @@ export const ServiceScene = {
         ratingAfter: currentRating(svc.state),
         used: svc.usage, toppingRevenue: svc.toppingRevenue,
         bonus: svc.bonusEarned,
+        xpToday: svc.xpToday,
         goalHit: !!svc.goal.hit,
         goalDesc: svc.goal.desc, goalReward: svc.goal.reward,
       };
@@ -407,6 +431,11 @@ export const ServiceScene = {
     d.hudStars.style.width = (rating / 5 * 100) + '%';
     const rTxt = rating.toFixed(1);
     if (force || d.hudRatingNum.textContent !== rTxt) d.hudRatingNum.textContent = rTxt;
+
+    // chef level pill + XP fill
+    const lvTxt = 'LV ' + s.level;
+    if (force || d.hudLevelNum.textContent !== lvTxt) d.hudLevelNum.textContent = lvTxt;
+    d.hudXpFill.style.width = Math.round(xpFrac(s) * 100) + '%';
   },
 
   _updateCursor(g) {
@@ -439,7 +468,7 @@ export const ServiceScene = {
   // ================= pointer =================
 
   onDown(g, x, y) {
-    if (!svc || svc.dayEndQueued) return;
+    if (!svc || svc.dayEndQueued || svc.paused) return;
 
     if (svc.stage === 'serve') {
       if (Math.hypot(x - BELL.x, y - BELL.y) < BELL.r + 10) {

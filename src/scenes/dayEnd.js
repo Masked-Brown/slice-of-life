@@ -10,6 +10,7 @@ import { clamp, lerp, Juice, Ease } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { saveGame, gbp } from '../state.js';
 import { ensureNextDay, checkMilestones } from '../goals.js';
+import { awardXP, celebrateLevelUp } from '../progress.js';
 import { analyticsHTML } from '../analytics.js';
 import { Telemetry } from '../telemetry.js';
 
@@ -55,6 +56,13 @@ export const DayEndScene = {
       lateBonus += def.reward;
     }
     state.lastDay.bonus += lateBonus;
+    // late XP (milestones settled here); the celebration waits for the
+    // receipt — the card shows on the way out to the shop
+    let pendingLevel = null;
+    if (lateHits.length) {
+      const lv = awardXP(state, lateHits.length * BAL.XP.MILESTONE);
+      if (lv.to > lv.from) pendingLevel = lv;
+    }
     saveGame(state);
 
     const el = g.dom.dayend;
@@ -85,8 +93,10 @@ export const DayEndScene = {
     ui.lines.push(
       { label: `Walk-outs × ${stats.lost}`, value: stats.lost > 0 ? '1★ each' : '—', money: false },
       { label: 'Avg satisfaction', value: stats.served ? Math.round(stats.satAvg) + '%' : '—', money: false },
+      { label: 'Chef XP', value: `+${(stats.xpToday || 0) + lateHits.length * BAL.XP.MILESTONE} ⭐`, money: false },
     );
     ui.total = total;
+    ui.pendingLevel = pendingLevel;
 
     el.innerHTML = `
       <div class="receipt">
@@ -109,6 +119,13 @@ export const DayEndScene = {
 
     el.querySelector('#btn-to-shop').addEventListener('click', () => {
       Sfx.press();
+      if (ui && ui.pendingLevel) {
+        const lv = ui.pendingLevel;
+        ui.pendingLevel = null;
+        el.querySelector('.receipt').classList.add('hidden');
+        celebrateLevelUp(g, lv, () => g.setScene('shop'));
+        return;
+      }
       g.setScene('shop');
     });
     el.querySelector('#btn-analytics').addEventListener('click', () => {

@@ -7,6 +7,7 @@ import { BAL } from '../balance.js';
 import { clamp, lerp, Juice, rand } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { priceMultiplier, pushRating, gbp } from '../state.js';
+import { orderXP } from '../progress.js';
 import { Orders } from './order.js';
 
 const BAKE_ORDER = ['raw', 'light', 'normal', 'well', 'burnt'];
@@ -237,6 +238,9 @@ export const Serve = {
       Juice.confetti(640, 300, 34);
       Sfx.perfect();
     }
+
+    // chef XP — accuracy is the multiplier, perfection the cherry
+    svc.onXP(orderXP(cust.ticket, res), cust.x, cust.y - 40);
 
     Orders.dismissFront(svc, mood);
     svc.onOrderDone(res);

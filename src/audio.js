@@ -238,4 +238,21 @@ export const Sfx = {
     blip({ type: 'sine', f0: 1568, dur: 0.5, vol: 0.08, delay: 0.34, noVary: true });
     noiseHit({ dur: 0.25, vol: 0.05, hp: 4200, delay: 0.3 });
   },
+
+  // ---- level-up: a rising major arpeggio with a shimmer tail ---------------
+  levelUp() {
+    const notes = [523, 659, 784, 1047, 1319];
+    notes.forEach((f, i) => {
+      blip({ type: 'triangle', f0: f, dur: 0.32, vol: 0.13, delay: i * 0.07, noVary: true });
+      blip({ type: 'sine', f0: f * 2, dur: 0.2, vol: 0.04, delay: i * 0.07 + 0.02, noVary: true });
+    });
+    blip({ type: 'sine', f0: 2093, dur: 0.7, vol: 0.07, delay: 0.4, noVary: true });
+    noiseHit({ dur: 0.35, vol: 0.05, hp: 5000, delay: 0.38 });
+  },
+
+  // pre-order due warning / oven-slot alarm — gentle but insistent
+  alarm() {
+    blip({ type: 'square', f0: 1175, dur: 0.09, vol: 0.07, noVary: true });
+    blip({ type: 'square', f0: 1175, dur: 0.09, vol: 0.06, delay: 0.14, noVary: true });
+  },
 };
