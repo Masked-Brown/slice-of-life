@@ -4,7 +4,7 @@
 // topping bins (bottom), oven (right). Owns the order state machine.
 // =====================================================================
 
-import { BAL } from '../balance.js';
+import { BAL, ING } from '../balance.js';
 import { clamp, lerp, rand, Juice, Ease, rr } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { currentRating, pushRating, saveGame, gbp, refundStock } from '../state.js';
@@ -65,6 +65,7 @@ export const ServiceScene = {
       arrivalIn: BAL.DAYS.FIRST_ARRIVAL,
       served: 0, lost: 0, sales: 0, tipsTotal: 0, sats: [],
       usage: {}, toppingRevenue: {},          // per-topping analytics for the day
+      emergencyCost: 0,                       // corner-shop dashes (basics at zero)
       lowWarned: {}, outWarned: {},           // one stock warning per topping per day
       goal: { ...plan.goal, hit: false, failed: false },
       bonusEarned: 0,                         // goal + milestone cash won today
@@ -127,14 +128,16 @@ export const ServiceScene = {
         <span class="db-note">in demand · +${Math.round(BAL.SPECIALS.PRICE_PREMIUM * 100)}% on those orders</span>
       </div>`).join('');
 
-    const chips = state.toppings.map(t => {
-      const n = state.stock[t] | 0;
-      const cls = n === 0 ? 'db-chip-out' : n <= BAL.STOCK.LOW_AT ? 'db-chip-low' : '';
-      return `<span class="db-chip ${cls}">${BAL.TOPPINGS[t].label} ×${n}</span>`;
+    const lowAt = k => BAL.BASICS[k] ? BAL.STOCK.LOW_AT_BASICS : BAL.STOCK.LOW_AT;
+    const stockKeys = [...Object.keys(BAL.BASICS), ...state.toppings];
+    const chips = stockKeys.map(k => {
+      const n = state.stock[k] | 0;
+      const cls = n === 0 ? 'db-chip-out' : n <= lowAt(k) ? 'db-chip-low' : '';
+      return `<span class="db-chip ${cls}">${ING(k).label} ×${n}</span>`;
     }).join('');
-    const flagged = state.toppings.filter(t => (state.stock[t] | 0) <= BAL.STOCK.LOW_AT);
+    const flagged = stockKeys.filter(k => (state.stock[k] | 0) <= lowAt(k));
     const stockNote = flagged.length
-      ? `<div class="db-warn">⚠ Low on ${flagged.map(t => BAL.TOPPINGS[t].label).join(', ')} — restock in the shop!</div>`
+      ? `<div class="db-warn">⚠ Low on ${flagged.map(k => ING(k).label).join(', ')} — restock in the shop!</div>`
       : `<div class="db-ok">Stock looks good ✓</div>`;
 
     el.innerHTML = `
@@ -208,9 +211,14 @@ export const ServiceScene = {
     svc._pouring = false;
     svc._wasInBand = false;        // fresh band tick for the next pour stage
     Sfx.sauceStop();
-    if (svc.stage === 'sauce') { svc.stage = 'cheese'; this._setTutorial('cheese'); }
-    else if (svc.stage === 'cheese') { svc.stage = 'toppings'; this._setTutorial('toppings'); }
-    else if (svc.stage === 'toppings') { svc.stage = 'tooven'; this._setTutorial('oven'); }
+    // committing a pour stage consumes one unit of its basic (if any poured)
+    if (svc.stage === 'sauce') {
+      if (pz && pz.sauceCoverage > 0) Build.useBasic(svc, 'sauce');
+      svc.stage = 'cheese'; this._setTutorial('cheese');
+    } else if (svc.stage === 'cheese') {
+      if (pz && pz.cheese.length > 0) Build.useBasic(svc, 'cheese');
+      svc.stage = 'toppings'; this._setTutorial('toppings');
+    } else if (svc.stage === 'toppings') { svc.stage = 'tooven'; this._setTutorial('oven'); }
   },
 
   _onBakeDone() {
@@ -381,6 +389,7 @@ export const ServiceScene = {
         ratingAfter: currentRating(svc.state),
         used: svc.usage, toppingRevenue: svc.toppingRevenue,
         bonus: svc.bonusEarned,
+        emergency: svc.emergencyCost,
         xpToday: svc.xpToday,
         goalHit: !!svc.goal.hit,
         goalDesc: svc.goal.desc, goalReward: svc.goal.reward,

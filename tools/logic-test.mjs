@@ -4,7 +4,8 @@
 // =====================================================================
 
 import { BAL, TOPPING_ORDER } from '../src/balance.js';
-import { newGame, migrate, unitCost, currentRating, levelForXP, xpProgress } from '../src/state.js';
+import { newGame, migrate, unitCost, currentRating, levelForXP, xpProgress,
+         addStock, consumeStock, refundStock, expireDay, expiringTomorrow, shelfLife } from '../src/state.js';
 import { Score } from '../src/stations/serve.js';
 import { Orders } from '../src/stations/order.js';
 import { ensureNextDay, checkMilestones, metrics, goalProgress } from '../src/goals.js';
@@ -163,6 +164,49 @@ console.log('regulars');
   }
   check('regulars appear', seenReg > 0, `(saw ${seenReg})`);
   check('only eligible regulars (no locked toppings/sizes)', bad === 0, `(${bad} bad)`);
+}
+
+// ---- 8b. spoilage & stock batches ----------------------------------------------
+console.log('spoilage');
+{
+  const s = newGame();
+  const sync = k => (s.stockAges[k] || []).reduce((a, b) => a + b.n, 0) === (s.stock[k] | 0);
+
+  // FIFO consume: oldest batch drains first
+  s.stock.pepperoni = 0; s.stockAges.pepperoni = [];
+  addStock(s, 'pepperoni', 10);
+  s.stockAges.pepperoni[0].age = 2;              // pretend it's older stock
+  addStock(s, 'pepperoni', 10);
+  const r = consumeStock(s, 'pepperoni', 12);
+  check('consume drains oldest batch first', r.taken === 12
+    && s.stockAges.pepperoni.length === 1 && s.stockAges.pepperoni[0].age === 0, JSON.stringify(s.stockAges.pepperoni));
+  check('flat count stays in sync after consume', sync('pepperoni'));
+  refundStock(s, 'pepperoni', 2);
+  check('refund keeps sync', sync('pepperoni') && s.stock.pepperoni === 10);
+
+  // expiry: mushroom keeps 3 days → 3 day-ends, gone on the 3rd
+  s.stock.mushroom = 0; s.stockAges.mushroom = [];
+  addStock(s, 'mushroom', 8);
+  let w1 = expireDay(s), w2 = expireDay(s);
+  check('fresh stock survives early day-ends', !w1.mushroom && !w2.mushroom && s.stock.mushroom === 8);
+  check('expiring-tomorrow flags the last night', expiringTomorrow(s, 'mushroom') === 8);
+  const w3 = expireDay(s);
+  check('stock expires at shelf life', w3.mushroom && w3.mushroom.n === 8 && s.stock.mushroom === 0);
+  check('waste is valued in £', w3.mushroom.cost > 0
+    && Math.abs(w3.mushroom.cost - 8 * unitCost(s, 'mushroom')) < 1e-9);
+  check('batches stay in sync after expiry', sync('mushroom'));
+
+  // premium perishables spoil a day sooner
+  check('premium shortens shelf life', shelfLife('mushroom', 'premium') === shelfLife('mushroom') - 1);
+
+  // olives outlive mushrooms; pepperoni cured
+  check('shelf lives ordered sensibly',
+    shelfLife('olive') > shelfLife('mushroom') && shelfLife('pepperoni') > shelfLife('mushroom'));
+
+  // basics exist and start stocked in a new game
+  const fresh2 = newGame();
+  check('basics stocked from day 1', fresh2.stock.dough === BAL.STOCK.START_BASICS
+    && fresh2.stock.sauce === BAL.STOCK.START_BASICS && fresh2.stock.cheese === BAL.STOCK.START_BASICS);
 }
 
 // ---- 9. XP / level spine ------------------------------------------------------

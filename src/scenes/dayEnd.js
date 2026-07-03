@@ -8,7 +8,7 @@
 import { BAL } from '../balance.js';
 import { clamp, lerp, Juice, Ease } from '../juice.js';
 import { Sfx } from '../audio.js';
-import { saveGame, gbp } from '../state.js';
+import { saveGame, gbp, expireDay } from '../state.js';
 import { ensureNextDay, checkMilestones } from '../goals.js';
 import { awardXP, celebrateLevelUp } from '../progress.js';
 import { analyticsHTML } from '../analytics.js';
@@ -22,17 +22,26 @@ export const DayEndScene = {
     const state = g.state;
 
     // ---- bank the day -------------------------------------------------
+    // unsold perishables age overnight; expired batches are binned here so
+    // the receipt, analytics and telemetry all see the same waste numbers
+    const waste = expireDay(state);
+    const wasteCost = Object.values(waste).reduce((a, w) => a + w.cost, 0);
+    const wasteN = Object.values(waste).reduce((a, w) => a + w.n, 0);
+
     const restockSpend = state.carriedRestockSpend;
     state.lastDay = {
       day: stats.day, served: stats.served, lost: stats.lost,
       sales: stats.sales, tips: stats.tips, bonus: stats.bonus,
       restockSpend,
+      emergency: stats.emergency || 0,
+      waste, wasteCost, wasteN,
       satAvg: stats.satAvg, rating: stats.ratingAfter,
       used: stats.used, toppingRevenue: stats.toppingRevenue,
       goalHit: stats.goalHit, goalDesc: stats.goalDesc, goalReward: stats.goalReward,
     };
     state.carriedRestockSpend = 0;
-    const dayProfit = stats.sales + stats.tips + stats.bonus - restockSpend;
+    const dayProfit = stats.sales + stats.tips + stats.bonus - restockSpend
+      - (stats.emergency || 0);
     state.stats.bestDayProfit = Math.max(state.stats.bestDayProfit, dayProfit);
     state.lifetime.days += 1;
 
@@ -42,6 +51,8 @@ export const DayEndScene = {
       bonus: Math.round(stats.bonus), restockSpend: Math.round(restockSpend * 100) / 100,
       satAvg: Math.round(stats.satAvg), rating: Math.round(stats.ratingAfter * 10) / 10,
       money: Math.round(state.money),
+      wasteCost: Math.round(wasteCost * 100) / 100, wasteN,
+      emergency: Math.round((stats.emergency || 0) * 100) / 100,
     });
 
     state.day += 1;
@@ -90,6 +101,12 @@ export const DayEndScene = {
       ui.lines.push({ label: `Daily goal: ${stats.goalDesc}`, value: stats.goalHit ? '✓' : '✗', money: false });
     }
     if (restockSpend > 0) ui.lines.push({ label: 'Restock paid yesterday', value: '−' + gbp(restockSpend), money: false });
+    if ((stats.emergency || 0) > 0.005) {
+      ui.lines.push({ label: 'Corner-shop dashes 🏃', value: '−' + gbp(stats.emergency), money: false });
+    }
+    if (wasteN > 0) {
+      ui.lines.push({ label: `Spoiled overnight 🗑 ×${wasteN}`, value: '−' + gbp(wasteCost), money: false });
+    }
     ui.lines.push(
       { label: `Walk-outs × ${stats.lost}`, value: stats.lost > 0 ? '1★ each' : '—', money: false },
       { label: 'Avg satisfaction', value: stats.served ? Math.round(stats.satAvg) + '%' : '—', money: false },

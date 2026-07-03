@@ -3,10 +3,10 @@
 // game: everything here is hold-drag-feel. Owns the pizza model + render.
 // =====================================================================
 
-import { BAL, TOPPING_ORDER } from '../balance.js';
+import { BAL, TOPPING_ORDER, ING } from '../balance.js';
 import { clamp, lerp, rand, randi, dist, Juice, Ease, rr } from '../juice.js';
 import { Sfx } from '../audio.js';
-import { consumeStock, refundStock } from '../state.js';
+import { consumeStock, refundStock, unitCost, gbp } from '../state.js';
 import { Score } from './serve.js';
 
 // ---- layout (logical px) ----------------------------------------------
@@ -58,6 +58,41 @@ export const Build = {
     svc._splatCD = 0;
     svc._cheeseAcc = 0;
     svc._binShake = null;        // { type, t } — empty-bin feedback wobble
+    svc.orderGrades = {};        // { key: {grade: count} } consumed this order
+  },
+
+  // consume one unit of a basic (dough/sauce/cheese). Never blocks: at zero
+  // stock it auto-charges an emergency corner-shop run instead (soft-fail).
+  useBasic(svc, key) {
+    const r = consumeStock(svc.state, key, 1);
+    if (r.taken >= 1) {
+      svc.usage[key] = (svc.usage[key] || 0) + 1;
+      this._recordGrades(svc, key, r.grades);
+      this._basicWarning(svc, key);
+      return;
+    }
+    const cost = unitCost(svc.state, key) * BAL.STOCK.EMERGENCY_MULT;
+    svc.state.money -= cost;
+    svc.emergencyCost = (svc.emergencyCost || 0) + cost;
+    Juice.floatText(PIZZA_POS.x, PIZZA_POS.y - 150,
+      `Corner-shop ${ING(key).label.toLowerCase()}! −${gbp(cost)}`, { color: '#ff8a70', size: 17 });
+    Sfx.warn();
+  },
+
+  _recordGrades(svc, key, grades) {
+    const slot = svc.orderGrades[key] || (svc.orderGrades[key] = {});
+    for (const g in grades) slot[g] = (slot[g] || 0) + grades[g];
+  },
+
+  // one amber heads-up per basic per day, mirroring the bins
+  _basicWarning(svc, key) {
+    const n = svc.state.stock[key] | 0;
+    if (n > 0 && n <= BAL.STOCK.LOW_AT_BASICS && !svc.lowWarned[key]) {
+      svc.lowWarned[key] = true;
+      Juice.floatText(PIZZA_POS.x, PIZZA_POS.y - 150,
+        `Low on ${ING(key).label.toLowerCase()}!`, { color: '#f5b942', size: 17 });
+      Sfx.warn();
+    }
   },
 
   makePizza(size) {
@@ -258,6 +293,7 @@ export const Build = {
           }
           Sfx.press();
           svc.stage = 'doughdrop';
+          this.useBasic(svc, 'dough');
           this.spawnDough(svc, b.size);
           return;
         }
@@ -289,8 +325,8 @@ export const Build = {
       // grab from a bin (stock permitting)
       const bin = this._binAt(svc, x, y);
       if (bin) {
-        const stock = svc.state.stock[bin.type] | 0;
-        if (stock <= 0) {
+        const binStock = svc.state.stock[bin.type] | 0;
+        if (binStock <= 0) {
           // empty bin — the order has to go out without it
           svc._binShake = { type: bin.type, t: 0.4 };
           Juice.floatText(bin.x + bin.w / 2, bin.y - 30,
@@ -299,12 +335,13 @@ export const Build = {
           return;
         }
         let n = 1;
-        if (svc.state.upgrades.tongs >= 3 && stock >= 2) {
+        if (svc.state.upgrades.tongs >= 3 && binStock >= 2) {
           const w = this._needed(svc, bin.type);
           const placed = pz ? pz.toppings.filter(t => t.type === bin.type).length : 0;
           if (w != null && w - placed >= 2) n = 2; // double-grab when ≥2 still needed
         }
-        consumeStock(svc.state, bin.type, n);
+        const r = consumeStock(svc.state, bin.type, n);
+        this._recordGrades(svc, bin.type, r.grades);
         this._stockWarning(svc, bin.type);
         svc.held = { type: bin.type, x, y, n };
         Sfx.pluck();
@@ -608,6 +645,32 @@ export const Build = {
       rr(ctx, TRAY.x - 4, TRAY.y - 4, TRAY.w + 8, TRAY.h + 8, 16);
       ctx.lineWidth = 4; ctx.strokeStyle = '#ffd54a'; ctx.stroke();
     }
+    ctx.globalAlpha = 1;
+    this._stockChip(svc, ctx, 'dough', TRAY.x + 6, TRAY.y - 10);
+    ctx.restore();
+  },
+
+  // small ×N stock chip for a basics station — amber low, red empty
+  _stockChip(svc, ctx, key, x, y) {
+    const n = svc.state.stock[key] | 0;
+    const low = n > 0 && n <= BAL.STOCK.LOW_AT_BASICS;
+    ctx.save();
+    rr(ctx, x, y, 42, 19, 9);
+    ctx.fillStyle = n === 0 ? '#e25540' : low ? '#f5b942' : '#fffbef';
+    ctx.fill();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = OUTLINE; ctx.stroke();
+    if (low || n === 0) {
+      ctx.globalAlpha = 0.45 + 0.3 * Math.sin(svc.elapsed * (n === 0 ? 8 : 5));
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = n === 0 ? '#e25540' : '#f5b942';
+      rr(ctx, x - 3, y - 3, 48, 25, 11);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = n === 0 ? '#fff' : '#4a2e1d';
+    ctx.font = '900 12px Trebuchet MS, system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(`×${n}`, x + 21, y + 10);
     ctx.restore();
   },
 
@@ -627,6 +690,8 @@ export const Build = {
       ctx.beginPath(); ctx.arc(SAUCE_POT.x, SAUCE_POT.y, SAUCE_POT.r + 5, 0, Math.PI * 2);
       ctx.lineWidth = 4; ctx.strokeStyle = '#ffd54a'; ctx.stroke();
     }
+    ctx.globalAlpha = svc.stage === 'sauce' ? 1 : 0.85;
+    this._stockChip(svc, ctx, 'sauce', SAUCE_POT.x - 21, SAUCE_POT.y - SAUCE_POT.r - 26);
     ctx.restore();
 
     // cheese box
@@ -648,6 +713,8 @@ export const Build = {
       rr(ctx, CHEESE_BOX.x - CHEESE_BOX.w / 2 - 5, CHEESE_BOX.y - CHEESE_BOX.h / 2 - 5, CHEESE_BOX.w + 10, CHEESE_BOX.h + 10, 11);
       ctx.lineWidth = 4; ctx.strokeStyle = '#ffd54a'; ctx.stroke();
     }
+    ctx.globalAlpha = svc.stage === 'cheese' ? 1 : 0.85;
+    this._stockChip(svc, ctx, 'cheese', CHEESE_BOX.x - 21, CHEESE_BOX.y - CHEESE_BOX.h / 2 - 26);
     ctx.restore();
   },
 

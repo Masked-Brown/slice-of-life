@@ -266,9 +266,12 @@ console.log('scenario B: shop tabs + day board flags');
   check('shop opens with specials banner', await waitFor(page, () =>
     document.querySelector('.shop-banner') && document.querySelector('.shop-banner').textContent.includes('special')));
 
-  // restock tab: low/out flags + buying works
+  // restock tab: low/out flags + buying works (3 basics + 3 owned toppings)
   await page.click('.shop-tab[data-tab="restock"]');
-  check('restock rows for owned toppings', await page.locator('.rs-row:not(.rs-head-row)').count() === 3);
+  check('restock rows for basics + owned toppings',
+    await page.locator('.rs-row:not(.rs-head-row)').count() === 6);
+  check('shelf life shown per row', await page.evaluate(() =>
+    [...document.querySelectorAll('.rs-shelf')].some(el => /keeps \dd/.test(el.textContent))));
   check('low + out stock flagged', await page.evaluate(() =>
     document.querySelector('.rs-stock.rs-low') !== null && document.querySelector('.rs-stock.rs-out') !== null));
   check('last-session usage shown', await page.evaluate(() =>
@@ -286,7 +289,11 @@ console.log('scenario B: shop tabs + day board flags');
   await page.click('.shop-tab[data-tab="analytics"]');
   check('analytics shows the books', await page.evaluate(() =>
     document.querySelector('.an-panel') && document.querySelector('.an-title').textContent.includes('DAY 4')));
-  check('per-topping margin rows', await page.locator('.an-row:not(.an-head-row)').count() === 3);
+  check('per-topping margin rows + basics rows',
+    await page.locator('.an-row:not(.an-head-row):not(.an-basic-row)').count() === 3
+    && await page.locator('.an-basic-row').count() === 3);
+  check('waste column present', await page.evaluate(() =>
+    [...document.querySelectorAll('.an-head-row .an-num')].some(el => el.textContent === 'Waste')));
 
   // goals tab
   await page.click('.shop-tab[data-tab="goals"]');

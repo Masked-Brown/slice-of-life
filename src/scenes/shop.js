@@ -5,10 +5,10 @@
 // forecast, not a guess.
 // =====================================================================
 
-import { BAL, TOPPING_ORDER } from '../balance.js';
+import { BAL, TOPPING_ORDER, ING } from '../balance.js';
 import { Juice } from '../juice.js';
 import { Sfx } from '../audio.js';
-import { saveGame, gbp, unitCost, addStock } from '../state.js';
+import { saveGame, gbp, unitCost, addStock, shelfLife, expiringTomorrow } from '../state.js';
 import { ensureNextDay, checkMilestones, metrics } from '../goals.js';
 import { unlocked, unlockLevel } from '../progress.js';
 import { analyticsHTML } from '../analytics.js';
@@ -211,56 +211,82 @@ export const ShopScene = {
   },
 
   // ---- restock: the supply decision ------------------------------------
+  // one row per stocked ingredient: stock, yesterday's usage, shelf life,
+  // expiring-tonight warning, per-unit price, buy buttons
+  _restockRow(g, key, opts = {}) {
+    const s = g.state;
+    const def = ING(key);
+    const disc = BAL.SUPPLY_DISCOUNTS[s.upgrades.supply] || 0;
+    const stock = s.stock[key] | 0;
+    const used = s.lastDay ? (s.lastDay.used[key] || 0) : null;
+    const cost = unitCost(s, key);
+    const lowAt = opts.basic ? BAL.STOCK.LOW_AT_BASICS : BAL.STOCK.LOW_AT;
+    const low = stock <= lowAt;
+    const dying = expiringTomorrow(s, key);
+    const shelf = shelfLife(key, s.grades[key] || 'standard');
+    const specials = s.nextDay.specials;
+    const row = document.createElement('div');
+    row.className = 'rs-row';
+    row.innerHTML = `
+      <span class="rs-name"><span class="tk-dot" style="background:${def.dot}"></span>${def.label}
+        ${specials.includes(key) ? '<span class="rs-special">★ special</span>' : ''}
+        ${dying > 0 ? `<span class="rs-dying">⌛ ×${dying} tonight</span>` : ''}</span>
+      <span class="rs-stock ${stock === 0 ? 'rs-out' : low ? 'rs-low' : ''}">×${stock}</span>
+      <span class="rs-used">${used === null ? '—' : '×' + used}</span>
+      <span class="rs-shelf">${shelf === Infinity ? '—' : 'keeps ' + shelf + 'd'}</span>
+      <span class="rs-price">${disc > 0 ? `<s>${Math.round(def.unit * 100)}p</s> ` : ''}${Math.round(cost * 100)}p</span>
+      <span class="rs-btns"></span>`;
+    const btns = row.querySelector('.rs-btns');
+    for (const n of (opts.basic ? BAL.STOCK.BUY_AMOUNTS_BASICS : BAL.STOCK.BUY_AMOUNTS)) {
+      const price = cost * n;
+      const b = document.createElement('button');
+      b.className = 'btn rs-btn';
+      b.textContent = `+${n} · ${gbp(price)}`;
+      b.disabled = s.money < price;
+      b.addEventListener('click', () => {
+        if (s.money < price) return;
+        s.money -= price;
+        addStock(s, key, n);
+        s.carriedRestockSpend += price;
+        saveGame(s);
+        Sfx.buy();
+        const m = g.dom.shop.querySelector('#shop-money');
+        m.textContent = gbp(s.money);
+        this._renderTab(g);
+      });
+      btns.appendChild(b);
+    }
+    return row;
+  },
+
   _restockTab(g, grid) {
     const s = g.state;
-    const disc = BAL.SUPPLY_DISCOUNTS[s.upgrades.supply] || 0;
     const list = document.createElement('div');
     list.className = 'restock-list';
     list.innerHTML = `
       <div class="rs-row rs-head-row">
         <span class="rs-name">Ingredient</span><span class="rs-stock">In stock</span>
-        <span class="rs-used">Used yesterday</span><span class="rs-price">Per piece</span>
+        <span class="rs-used">Used yesterday</span><span class="rs-shelf">Shelf life</span>
+        <span class="rs-price">Per unit</span>
         <span class="rs-btns"></span>
       </div>`;
 
-    const specials = s.nextDay.specials;
+    // basics first — every pizza spends one of each
+    const basicsHead = document.createElement('div');
+    basicsHead.className = 'rs-section-head';
+    basicsHead.textContent = 'BASICS — 1 UNIT PER PIZZA · RUN DRY AND THE CORNER SHOP CHARGES ×' + BAL.STOCK.EMERGENCY_MULT;
+    list.appendChild(basicsHead);
+    for (const key of Object.keys(BAL.BASICS)) {
+      list.appendChild(this._restockRow(g, key, { basic: true }));
+    }
+
+    const topHead = document.createElement('div');
+    topHead.className = 'rs-section-head';
+    topHead.textContent = 'TOPPINGS';
+    list.appendChild(topHead);
     for (const key of TOPPING_ORDER) {
       if (!s.toppings.includes(key)) continue;
-      const t = BAL.TOPPINGS[key];
-      const stock = s.stock[key] | 0;
-      const used = s.lastDay ? (s.lastDay.used[key] || 0) : null;
-      const cost = unitCost(s, key);
-      const low = stock <= BAL.STOCK.LOW_AT;
-      const row = document.createElement('div');
-      row.className = 'rs-row';
-      row.innerHTML = `
-        <span class="rs-name"><span class="tk-dot" style="background:${t.dot}"></span>${t.label}
-          ${specials.includes(key) ? '<span class="rs-special">★ special</span>' : ''}</span>
-        <span class="rs-stock ${stock === 0 ? 'rs-out' : low ? 'rs-low' : ''}">×${stock}</span>
-        <span class="rs-used">${used === null ? '—' : '×' + used}</span>
-        <span class="rs-price">${disc > 0 ? `<s>${Math.round(t.unit * 100)}p</s> ` : ''}${Math.round(cost * 100)}p</span>
-        <span class="rs-btns"></span>`;
-      const btns = row.querySelector('.rs-btns');
-      for (const n of BAL.STOCK.BUY_AMOUNTS) {
-        const price = cost * n;
-        const b = document.createElement('button');
-        b.className = 'btn rs-btn';
-        b.textContent = `+${n} · ${gbp(price)}`;
-        b.disabled = s.money < price;
-        b.addEventListener('click', () => {
-          if (s.money < price) return;
-          s.money -= price;
-          addStock(s, key, n);
-          s.carriedRestockSpend += price;
-          saveGame(s);
-          Sfx.buy();
-          const m = g.dom.shop.querySelector('#shop-money');
-          m.textContent = gbp(s.money);
-          this._renderTab(g);
-        });
-        btns.appendChild(b);
-      }
-      list.appendChild(row);
+      list.appendChild(this._restockRow(g, key));
     }
     grid.appendChild(list);
 

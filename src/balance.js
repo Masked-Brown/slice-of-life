@@ -280,7 +280,8 @@ export const BAL = {
     NEW_TOPPING_INCLUDED: 20,    // stock included when a topping is unlocked
     LOW_AT: 6,                   // low-stock warning threshold (amber)
     LOW_AT_BASICS: 8,            // basics warn a little earlier
-    BUY_AMOUNTS: [5, 20],        // restock button quantities
+    BUY_AMOUNTS: [5, 20],        // restock button quantities (toppings)
+    BUY_AMOUNTS_BASICS: [10, 30],// restock button quantities (basics)
     EMERGENCY_MULT: 2.5,         // basics at 0 stock: auto-charge unit × this
   },
 

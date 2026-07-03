@@ -658,7 +658,7 @@ html, body {
 .restock-list { display: flex; flex-direction: column; gap: 6px; }
 .rs-row {
   display: grid;
-  grid-template-columns: 1.5fr 0.7fr 1fr 0.9fr 1.6fr;
+  grid-template-columns: 1.6fr 0.6fr 0.9fr 0.8fr 0.8fr 1.5fr;
   align-items: center;
   gap: 10px;
   background: var(--cream);
@@ -689,6 +689,16 @@ html, body {
   padding: 1px 7px;
 }
 .rs-stock { font-weight: 900; font-variant-numeric: tabular-nums; }
+.rs-shelf { font-size: 12px; color: #8a6f4f; font-variant-numeric: tabular-nums; }
+.rs-dying {
+  font-size: 11px;
+  font-weight: 900;
+  color: #a8281a;
+  background: #fbd9d2;
+  border: 1.5px dashed var(--red);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
 .rs-stock.rs-low { color: #b07d18; }
 .rs-stock.rs-out { color: var(--red); }
 .rs-used { color: #8a6f4f; font-variant-numeric: tabular-nums; }
@@ -710,7 +720,7 @@ html, body {
 .an-title { font-weight: 900; font-size: 17px; letter-spacing: 2px; color: var(--ink); text-align: center; }
 .an-summary {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   gap: 8px;
 }
 .an-stat {
@@ -728,9 +738,9 @@ html, body {
 .an-table { display: flex; flex-direction: column; gap: 5px; }
 .an-row {
   display: grid;
-  grid-template-columns: 1.4fr 0.5fr 1.6fr 0.8fr 0.8fr 0.8fr;
+  grid-template-columns: 1.3fr 0.45fr 1.3fr 0.75fr 0.75fr 0.75fr 0.75fr;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   background: var(--cream);
   border: 2.5px solid var(--ink);
   border-radius: 10px;
@@ -738,6 +748,14 @@ html, body {
   font-weight: 700;
   font-size: 13.5px;
   color: var(--ink);
+}
+.an-waste-n { font-style: normal; font-size: 10px; color: #a3886a; margin-left: 3px; }
+.an-waste-zero { color: #b9ab92; }
+.an-basics-head { margin-top: 8px; }
+.an-basic-row { background: #f2e7cf; }
+.an-bar-empty {
+  background: none; font-size: 11px; font-weight: 800; color: #a3886a;
+  text-align: center; height: auto;
 }
 .an-head-row {
   background: none;
