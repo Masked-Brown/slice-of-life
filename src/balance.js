@@ -124,15 +124,25 @@ export const BAL = {
               tiers: ['Faster sprinkle', 'Steadier hand near the band', 'Blizzard mode — fast & precise'] },
     tongs:  { name: 'Topping Tongs', costs: [90, 270, 630],
               tiers: ['Edge-save grip', 'Neat-grid snapping', 'Double-grab'] },
-    decor:  { name: 'Counter & Decor', costs: [110, 300, 690],
+    decor:  { name: 'Counter & Decor', costs: [110, 300, 690, 1200, 2000, 3200],
               tiers: ['Fresh paint, +1 queue slot, patience +15%',
                       'Plants & art, +1 slot, patience +15%',
-                      'Full refit, +1 slot, patience +15%'] },
+                      'Full refit, +1 slot, patience +15%',
+                      'Gallery wall — warmer light, tips +4%',
+                      'Terrazzo & brass — +1 customer a day',
+                      'The Landmark — tips +10% total, +2 customers'] },
     supply: { name: 'Supply Deals', costs: [70, 195, 460, 980],
               tiers: ['Bulk paper: restock −10%', 'Local farm deal: restock −20%',
                       'Wholesale account: restock −35%', 'Importer contract: restock −50%'] },
   },
   SUPPLY_DISCOUNTS: [0, 0.10, 0.20, 0.35, 0.50],  // restock discount by supply tier
+  // decor buffs by tier: queue/patience stack for the first three tiers,
+  // then the shop starts earning on charm instead
+  DECOR: {
+    QUEUE_PATIENCE_TIERS: 3,     // +1 slot & +15% patience apply up to here
+    TIP_FRAC: [0, 0, 0, 0, 0.04, 0.04, 0.10],   // flat tip multiplier bonus
+    FOOTFALL: [0, 0, 0, 0, 0, 1, 2],            // + customers per day
+  },
 
   // ---- Toppings (menu tab) — display order matters -----------------------
   // cost = unlock price · unit = restock £/piece (before supply discount)
@@ -179,6 +189,56 @@ export const BAL = {
     SAUCE_DEFAULT: 2.2,          // tomato this × more likely than each variant
     CRUST_DEFAULT: 2.2,          // classic likewise
   },
+
+  // ---- Specialty pizzas — named recipes at a premium -------------------------
+  // A specialty appears on tickets once its level unlock fires AND every
+  // component (toppings, sauce, crust, size) is owned. The ticket shows the
+  // name and the fixed build; the customer pays the premium.
+  RECIPE_CHANCE: 0.16,           // chance an eligible ticket becomes a specialty
+  RECIPES: {
+    doubledouble:  { name: 'Double Double',   premium: 0.22,
+      build: { size: 'M', crust: 'classic', sauceType: 'tomato', sauce: 'heavy', cheese: 'heavy', bake: 'normal',
+               toppings: [{ type: 'pepperoni', count: 8 }] } },
+    meatfeast:     { name: 'Meat Feast',      premium: 0.28,
+      build: { size: 'M', crust: 'classic', sauceType: 'tomato', sauce: 'normal', cheese: 'normal', bake: 'well',
+               toppings: [{ type: 'pepperoni', count: 5 }, { type: 'ham', count: 5 }] } },
+    veggiesupreme: { name: 'Veggie Supreme',  premium: 0.26,
+      build: { size: 'M', crust: 'classic', sauceType: 'tomato', sauce: 'normal', cheese: 'light', bake: 'normal',
+               toppings: [{ type: 'mushroom', count: 4 }, { type: 'pepper', count: 4 }, { type: 'sweetcorn', count: 4 }] } },
+    hawaiian:      { name: 'Hawaiian Classic', premium: 0.28,
+      build: { size: 'M', crust: 'classic', sauceType: 'tomato', sauce: 'normal', cheese: 'normal', bake: 'light',
+               toppings: [{ type: 'ham', count: 5 }, { type: 'pineapple', count: 5 }] } },
+    firebreather:  { name: 'Fire Breather',   premium: 0.32,
+      build: { size: 'M', crust: 'classic', sauceType: 'bbq', sauce: 'heavy', cheese: 'normal', bake: 'well',
+               toppings: [{ type: 'chilli', count: 5 }, { type: 'pepperoni', count: 4 }, { type: 'onion', count: 4 }] } },
+    farmhouse:     { name: 'Farmhouse',       premium: 0.32,
+      build: { size: 'M', crust: 'classic', sauceType: 'white', sauce: 'normal', cheese: 'normal', bake: 'normal',
+               toppings: [{ type: 'bacon', count: 4 }, { type: 'mushroom', count: 4 }, { type: 'sweetcorn', count: 4 }] } },
+    oceancatch:    { name: 'Ocean Catch',     premium: 0.36,
+      build: { size: 'M', crust: 'classic', sauceType: 'tomato', sauce: 'light', cheese: 'light', bake: 'normal',
+               toppings: [{ type: 'anchovy', count: 4 }, { type: 'olive', count: 5 }, { type: 'artichoke', count: 3 }] } },
+    latruffa:      { name: 'La Truffa',       premium: 0.45,
+      build: { size: 'M', crust: 'thin', sauceType: 'white', sauce: 'light', cheese: 'normal', bake: 'light',
+               toppings: [{ type: 'truffle', count: 3 }, { type: 'goatcheese', count: 4 }, { type: 'spinach', count: 4 }] } },
+  },
+
+  // ---- Sides — rhythm breakers, not a second game ----------------------------
+  // Both reuse the learned hold-release-in-the-band skill.
+  SIDES: {
+    garlicbread: { name: 'Garlic Bread', price: 3.4, stockKey: 'gbread', cost: 150,
+                   verb: 'Butter it', toastTime: 3.2 },
+    drinks:      { name: 'Fizzy Drink', price: 1.9, stockKey: 'cans', cost: 120,
+                   verb: 'Pour to the line' },
+  },
+  SIDE_STOCK: {
+    gbread: { label: 'Bread loaves', unit: 0.45, dot: '#e8c88a', shelf: 2 },
+    cans:   { label: 'Drink cans',   unit: 0.35, dot: '#6fb3d9', shelf: 10 },
+  },
+  SIDE_CHANCE: 0.30,             // chance a ticket adds a side (once owned)
+  SIDE_RATE: 0.55,               // fill fraction/sec while holding
+  SIDE_BAND: [58, 82],           // release band (% full) for side quality
+  SIDE_SAT: { PERFECT: 3, SLOPPY: -2, MISSING: -5 },
+  SIDE_PAY_FLOOR: 0.55,          // side price × (floor + (1-floor) × quality)
 
   // ---- Basics (dough / sauce base / cheese) — V3 stocked ingredients ------
   // Consumed 1 unit per pizza (flat, any size — forecasting stays "units ≈

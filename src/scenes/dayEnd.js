@@ -37,12 +37,15 @@ export const DayEndScene = {
       waste, wasteCost, wasteN,
       gradeUplift: stats.gradeUplift || 0,
       gradeUnits: stats.gradeUnits || {},
+      sideRevenue: stats.sideRevenue || {},
+      sidesSold: stats.sidesSold || 0,
       satAvg: stats.satAvg, rating: stats.ratingAfter,
       used: stats.used, toppingRevenue: stats.toppingRevenue,
       goalHit: stats.goalHit, goalDesc: stats.goalDesc, goalReward: stats.goalReward,
     };
     state.carriedRestockSpend = 0;
-    const dayProfit = stats.sales + stats.tips + stats.bonus - restockSpend
+    const sideRevTotal = Object.values(stats.sideRevenue || {}).reduce((a, b) => a + b, 0);
+    const dayProfit = stats.sales + stats.tips + stats.bonus + sideRevTotal - restockSpend
       - (stats.emergency || 0);
     state.stats.bestDayProfit = Math.max(state.stats.bestDayProfit, dayProfit);
     state.lifetime.days += 1;
@@ -93,11 +96,15 @@ export const DayEndScene = {
     };
 
     const bonusTotal = stats.bonus + lateBonus;
-    const total = stats.sales + stats.tips + bonusTotal;
+    const sideTotal = Object.values(stats.sideRevenue || {}).reduce((a, b) => a + b, 0);
+    const total = stats.sales + stats.tips + bonusTotal + sideTotal;
     ui.lines = [
       { label: `Pizzas served × ${stats.served}`, value: stats.sales, money: true },
       { label: 'Tips', value: stats.tips, money: true },
     ];
+    if ((stats.sidesSold || 0) > 0) {
+      ui.lines.push({ label: `Sides × ${stats.sidesSold}`, value: sideTotal, money: true });
+    }
     if (bonusTotal > 0) ui.lines.push({ label: 'Goals & milestones 🎯', value: bonusTotal, money: true });
     if (stats.goalDesc) {
       ui.lines.push({ label: `Daily goal: ${stats.goalDesc}`, value: stats.goalHit ? '✓' : '✗', money: false });

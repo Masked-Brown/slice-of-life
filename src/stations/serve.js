@@ -6,7 +6,7 @@
 import { BAL } from '../balance.js';
 import { clamp, lerp, Juice, rand } from '../juice.js';
 import { Sfx } from '../audio.js';
-import { priceMultiplier, pushRating, gbp } from '../state.js';
+import { priceMultiplier, pushRating, gbp, tipMult } from '../state.js';
 import { orderXP } from '../progress.js';
 import { Orders } from './order.js';
 
@@ -98,8 +98,9 @@ export const Score = {
   },
 
   // The whole order → money + satisfaction. `splats` = sauce counter splats,
-  // `gradeBonus` = satisfaction points from supplier grades consumed.
-  scoreOrder({ pizza, ticket, elapsed, splats, state, prepGrace, gradeBonus = 0 }) {
+  // `gradeBonus` = satisfaction points from supplier grades consumed,
+  // `satAdjust` = other satisfaction shifts (sides, event moods).
+  scoreOrder({ pizza, ticket, elapsed, splats, state, prepGrace, gradeBonus = 0, satAdjust = 0 }) {
     const S = BAL.SCORE, W = S.WEIGHTS, E = BAL.ECONOMY;
 
     const sizeFrac = pizza.size === ticket.size ? 1 : 0;
@@ -129,7 +130,8 @@ export const Score = {
     const over = clamp((elapsed - par) / (par * (S.PAR_FAIL_X - 1)), 0, 1);
     const speedK = 1 - over;
     const sat0 = Math.round(clamp(accuracy * lerp(S.SPEED_FLOOR, 1, speedK), 0, 100));
-    const satisfaction = Math.round(clamp(sat0 + gradeBonus, 0, 100));
+    const sat1 = Math.round(clamp(sat0 + satAdjust, 0, 100));
+    const satisfaction = Math.round(clamp(sat1 + gradeBonus, 0, 100));
 
     // money — meta.mult is the prestige scaffold's single economy touchpoint
     // (1.0 in V3 = no effect); pay, tip and analytics all flow from price.
@@ -142,7 +144,12 @@ export const Score = {
     let price = (E.BASE_PRICE[ticket.size] + toppingPrice + crustAdd)
       * priceMultiplier(state) * (state.meta ? state.meta.mult : 1);
     if (ticket.special) price *= 1 + BAL.SPECIALS.PRICE_PREMIUM;
+    // specialty recipes charge their own premium
+    if (ticket.specialty && BAL.RECIPES[ticket.specialty]) {
+      price *= 1 + BAL.RECIPES[ticket.specialty].premium;
+    }
 
+    const tips = tipMult(state);
     const moneyFor = sat => {
       const pay = price * lerp(E.SAT_MULT_MIN, E.SAT_MULT_MAX, sat / 100);
       let tipFrac = 0;
@@ -154,10 +161,10 @@ export const Score = {
           tipFrac = E.TIP_KNEE_FRAC + (E.TIP_MAX_FRAC - E.TIP_KNEE_FRAC) * Math.pow(k, 1.2);
         }
       }
-      return { pay, tip: price * tipFrac };
+      return { pay, tip: price * tipFrac * tips };
     };
     const { pay, tip } = moneyFor(satisfaction);
-    const base = moneyFor(sat0);
+    const base = moneyFor(sat1);
     // what the grade bonus was actually worth, in money — analytics uses this
     const gradeUplift = (pay + tip) - (base.pay + base.tip);
 
@@ -185,11 +192,30 @@ export const Serve = {
     const prepGrace = svc.prepLeft > 0;
     if (prepGrace) svc.prepLeft--;
 
+    // side outcome shifts satisfaction and (if made) earns its own money
+    const ticket = cust.ticket;
+    let sideSat = 0, sidePay = 0;
+    if (ticket.side) {
+      const S = BAL.SIDES[ticket.side];
+      const side = svc.side;
+      if (side && side.state === 'ready') {
+        sidePay = S.price * (BAL.SIDE_PAY_FLOOR + (1 - BAL.SIDE_PAY_FLOOR) * side.frac)
+          * (svc.state.meta ? svc.state.meta.mult : 1);
+        sideSat = side.frac > 0.9 ? BAL.SIDE_SAT.PERFECT : side.frac > 0.5 ? 0 : BAL.SIDE_SAT.SLOPPY;
+      } else {
+        sideSat = BAL.SIDE_SAT.MISSING;      // ordered, never made — they notice
+      }
+    }
+
     const res = Score.scoreOrder({
-      pizza: svc.pizza, ticket: cust.ticket, elapsed,
+      pizza: svc.pizza, ticket, elapsed,
       splats: svc.splatCount, state: svc.state, prepGrace,
       gradeBonus: Score.gradeSatBonus(svc.orderGrades),
+      satAdjust: sideSat,
     });
+    res.sidePay = sidePay;
+    res.sideKey = ticket.side || null;
+    res.sideMade = sidePay > 0;
 
     Sfx.bell();
     svc.stage = 'handoff';
@@ -235,7 +261,15 @@ export const Serve = {
       res.tip += res.price * R.TIP_BONUS_FRAC;
     }
 
-    const total = res.pay + res.tip;
+    // sides ring up alongside the pizza
+    if (res.sidePay > 0) {
+      svc.sideRevenue = svc.sideRevenue || {};
+      svc.sideRevenue[res.sideKey] = (svc.sideRevenue[res.sideKey] || 0) + res.sidePay;
+      svc.sidesSold = (svc.sidesSold || 0) + 1;
+      Juice.floatText(cust.x - 46, cust.y - 118, '+' + gbp(res.sidePay) + ' side', { color: '#8fd0f0', size: 18 });
+    }
+
+    const total = res.pay + res.tip + (res.sidePay || 0);
     state.money += total;
     state.stats.lifetimeServed++;
     state.stats.lifetimeEarned += total;
@@ -290,7 +324,9 @@ export const Serve = {
     }
 
     // chef XP — accuracy is the multiplier, perfection the cherry
-    svc.onXP(orderXP(cust.ticket, res), cust.x, cust.y - 40);
+    let xp = orderXP(cust.ticket, res);
+    if (res.sideMade) xp += BAL.XP.SIDE_BONUS;
+    svc.onXP(xp, cust.x, cust.y - 40);
 
     Orders.dismissFront(svc, mood);
     svc.onOrderDone(res);

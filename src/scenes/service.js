@@ -15,6 +15,7 @@ import { Orders } from '../stations/order.js';
 import { Build, PIZZA_POS, TRAY, NEXT_BTN, BINS_Y } from '../stations/build.js';
 import { Oven, OVEN } from '../stations/oven.js';
 import { Serve } from '../stations/serve.js';
+import { Sides } from '../stations/sides.js';
 
 const OUTLINE = '#4a2e1d';
 const PASS = { x: 794, y: 268 };
@@ -95,6 +96,7 @@ export const ServiceScene = {
     g._svc = svc;   // debug/testing handle
 
     Build.resetForOrder(svc);
+    Sides.resetForOrder(svc);
     Oven.resetDay(svc);
 
     g.dom.hud.classList.remove('hidden');
@@ -191,6 +193,7 @@ export const ServiceScene = {
     svc.orderIndex++;
     svc.ticket = c.ticket;
     Build.resetForOrder(svc);
+    Sides.resetForOrder(svc);
     svc.stage = 'dough';
     Orders.pinTicket(svc, c);
     Sfx.tick();
@@ -250,6 +253,7 @@ export const ServiceScene = {
     svc.ticket = null;
     svc.stage = 'idle';
     Build.resetForOrder(svc);
+    Sides.clear(svc);
     this._updateHUD();
   },
 
@@ -343,6 +347,7 @@ export const ServiceScene = {
       });
     }
     svc.held = null;
+    Sides.clear(svc);
     svc.stage = 'idle';
   },
 
@@ -367,6 +372,7 @@ export const ServiceScene = {
 
     Orders.update(svc, dt);
     Build.update(svc, dt);
+    Sides.update(svc, dt);
     Oven.update(svc, dt);
 
     this._updateHUD();
@@ -392,6 +398,8 @@ export const ServiceScene = {
         emergency: svc.emergencyCost,
         gradeUplift: svc.gradeUplift || 0,
         gradeUnits: svc.gradeUnits || {},
+        sideRevenue: svc.sideRevenue || {},
+        sidesSold: svc.sidesSold || 0,
         xpToday: svc.xpToday,
         goalHit: !!svc.goal.hit,
         goalDesc: svc.goal.desc, goalReward: svc.goal.reward,
@@ -505,6 +513,7 @@ export const ServiceScene = {
       });
       return;
     }
+    if (Sides.onDown(svc, x, y)) return;
     Build.onDown(svc, x, y);
   },
 
@@ -537,6 +546,7 @@ export const ServiceScene = {
       }
       return;
     }
+    Sides.onUp(svc);
     Build.onUp(svc, x, y);
   },
 
@@ -549,6 +559,7 @@ export const ServiceScene = {
     this._renderCounter(ctx);
     this._renderRail(ctx);
     Oven.render(svc, ctx);
+    Sides.render(svc, ctx);
     this._renderPass(ctx);
     Build.render(svc, ctx);
     if (svc.stage === 'idle' && svc.customers.length === 0 && svc.pending.length > 0) {
@@ -564,14 +575,15 @@ export const ServiceScene = {
 
   _renderBackground(g, ctx) {
     const tier = svc.state.upgrades.decor;
+    const ti = Math.min(tier, 3);           // palette caps; higher tiers add props
     const W = g.W;
 
     // wall behind the queue — warm two-tone with depth
     const wallColors = ['#e8d5ae', '#f2d9b0', '#f6e0bb', '#fbe7c4'];
     const wallLo = ['#dcc497', '#e6c898', '#eccfa2', '#f1d6ab'];
     const wg = ctx.createLinearGradient(0, 0, 0, 152);
-    wg.addColorStop(0, wallColors[tier]);
-    wg.addColorStop(1, wallLo[tier]);
+    wg.addColorStop(0, wallColors[ti]);
+    wg.addColorStop(1, wallLo[ti]);
     ctx.fillStyle = wg;
     ctx.fillRect(0, 0, W, 152);
 
@@ -746,6 +758,46 @@ export const ServiceScene = {
       ctx.beginPath(); ctx.arc(615, 56, 8, 0, Math.PI * 2); ctx.fill();
     }
     if (tier >= 3) this._drawPlant(ctx, 905, 134);
+
+    // tier 4+: the gallery wall — extra frames, warmer light
+    if (tier >= 4) {
+      ctx.save();
+      ctx.lineWidth = 3.5; ctx.strokeStyle = OUTLINE;
+      for (const [fx, fy, fw, fh, art] of [[700, 34, 52, 40, '#7bbf5e'], [770, 44, 40, 34, '#5da9d6'], [826, 30, 46, 44, '#d678c0']]) {
+        ctx.fillStyle = '#9c6b3c';
+        rr(ctx, fx, fy, fw, fh, 5); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#f6e7c9';
+        rr(ctx, fx + 5, fy + 5, fw - 10, fh - 10, 3); ctx.fill();
+        ctx.fillStyle = art;
+        ctx.beginPath(); ctx.arc(fx + fw / 2, fy + fh / 2, Math.min(fw, fh) * 0.22, 0, Math.PI * 2); ctx.fill();
+      }
+      // warm wash over the whole wall
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = '#ffb84d';
+      ctx.fillRect(0, 0, W, 152);
+      ctx.restore();
+    }
+    // tier 6: the landmark — a little chandelier and a brass plaque
+    if (tier >= 6) {
+      ctx.save();
+      ctx.strokeStyle = '#8a6f4f'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(650, 0); ctx.lineTo(650, 22); ctx.stroke();
+      ctx.lineWidth = 3.5; ctx.strokeStyle = OUTLINE;
+      ctx.fillStyle = '#c9a227';
+      ctx.beginPath(); ctx.arc(650, 34, 13, Math.PI, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+      for (const dx of [-16, 0, 16]) {
+        const tw = 0.6 + 0.4 * Math.sin(svc.elapsed * 3 + dx);
+        ctx.fillStyle = `rgba(255,222,120,${0.5 + 0.5 * tw})`;
+        ctx.beginPath(); ctx.arc(650 + dx, 40, 4.5, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = '#c9a227';
+      rr(ctx, 292, 96, 66, 26, 5); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#4a2e1d';
+      ctx.font = '900 9px Trebuchet MS, system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('EST. DAY 1', 325, 109);
+      ctx.restore();
+    }
   },
 
   _drawPlant(ctx, x, y) {
@@ -791,6 +843,18 @@ export const ServiceScene = {
       for (let x = 0; x < BAL.W; x += 42) {
         rr(ctx, x + 3, 181, 36, 14, 4); ctx.fill();
       }
+    }
+    if (tier >= 5) { // terrazzo flecks + brass edge strip
+      ctx.save();
+      for (let i = 0; i < 60; i++) {
+        const fx = (i * 137.3) % BAL.W;
+        const fy = 210 + (i * 83.7) % (BAL.H - 240);
+        ctx.fillStyle = ['rgba(253,243,221,0.25)', 'rgba(226,114,91,0.2)', 'rgba(93,169,214,0.16)'][i % 3];
+        ctx.beginPath(); ctx.arc(fx, fy, 2.5 + (i % 3), 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = '#c9a227';
+      ctx.fillRect(0, 176, BAL.W, 3);
+      ctx.restore();
     }
   },
 

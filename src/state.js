@@ -198,20 +198,30 @@ export function customersForDay(state) {
   const rating = currentRating(state);
   const n = D.BASE_CUSTOMERS
     + (state.day - 1) * D.CUSTOMERS_PER_DAY
-    + Math.round((rating - BAL.RATING.START) * D.RATING_BONUS_MULT);
-  return clamp(n, D.MIN_CUSTOMERS, D.MAX_CUSTOMERS);
+    + Math.round((rating - BAL.RATING.START) * D.RATING_BONUS_MULT)
+    + (BAL.DECOR.FOOTFALL[state.upgrades.decor] || 0);
+  return clamp(n, D.MIN_CUSTOMERS, D.MAX_CUSTOMERS + (BAL.DECOR.FOOTFALL[state.upgrades.decor] || 0));
 }
 
 export function priceMultiplier(state) {
   return 1 + (currentRating(state) - BAL.RATING.START) * BAL.ECONOMY.RATING_PRICE_MULT;
 }
 
+// decor's queue/patience perks stack over the first three tiers only —
+// later tiers earn on charm (tips, footfall) instead
 export function queueSlots(state) {
-  return BAL.QUEUE.BASE_SLOTS + state.upgrades.decor;
+  return BAL.QUEUE.BASE_SLOTS + Math.min(state.upgrades.decor, BAL.DECOR.QUEUE_PATIENCE_TIERS);
 }
 
 export function patienceMult(state) {
-  return 1 + state.upgrades.decor * BAL.PATIENCE.DECOR_BONUS;
+  return 1 + Math.min(state.upgrades.decor, BAL.DECOR.QUEUE_PATIENCE_TIERS) * BAL.PATIENCE.DECOR_BONUS;
+}
+
+// tip multiplier from decor charm (+ the golden bell capstone at L30)
+export function tipMult(state) {
+  let m = 1 + (BAL.DECOR.TIP_FRAC[state.upgrades.decor] || 0);
+  if (state.level >= 30) m += BAL.CAPSTONE_TIP_BONUS;
+  return m;
 }
 
 // =====================================================================

@@ -278,6 +278,52 @@ console.log('variants & grades');
   check('all 18 toppings fully defined', allOk && TOPPING_ORDER.length === 18);
 }
 
+// ---- 8d. specialties, sides, decor buffs -----------------------------------------
+console.log('specialties & sides & decor');
+{
+  const s = newGame();
+  check('no recipes available at level 1', Orders.availableRecipes(s).length === 0);
+  s.level = 30;
+  const starterAvail = Orders.availableRecipes(s);
+  check('recipes need owned components', starterAvail.length === 1 && starterAvail[0] === 'doubledouble',
+    `(got ${starterAvail.join(',')})`);
+  s.toppings = [...TOPPING_ORDER];
+  s.sauces = ['tomato', 'bbq', 'white'];
+  s.crusts = ['classic', 'thin', 'stuffed'];
+  const avail = Orders.availableRecipes(s);
+  check('all recipes available fully stocked at L30', avail.length === Object.keys(BAL.RECIPES).length,
+    `(${avail.length})`);
+  // recipe builds only reference real content
+  const sane = Object.values(BAL.RECIPES).every(r =>
+    r.build.toppings.every(t => BAL.TOPPINGS[t.type])
+    && BAL.SAUCES[r.build.sauceType] && BAL.CRUSTS[r.build.crust]);
+  check('recipe builds reference real content', sane);
+
+  // specialty premium lands in the price
+  const t = Orders.recipeTicket(s, 'meatfeast');
+  const pz = { size: t.size, R: BAL.PIZZA.RADIUS[t.size], sauceCoverage: 60, sauceType: t.sauceType,
+    crust: t.crust, cheese: new Array(60), toppings: [], bakeZone: t.bake };
+  const spec = Score.scoreOrder({ pizza: pz, ticket: t, elapsed: 20, splats: 0, state: s, prepGrace: false });
+  const plain = Score.scoreOrder({ pizza: pz, ticket: { ...t, specialty: null }, elapsed: 20, splats: 0, state: s, prepGrace: false });
+  const wantP = 1 + BAL.RECIPES.meatfeast.premium;
+  check('specialty charges its premium', Math.abs(spec.price / plain.price - wantP) < 1e-9);
+
+  // sides: missing side dents satisfaction via satAdjust
+  const missing = Score.scoreOrder({ pizza: pz, ticket: t, elapsed: 20, splats: 0, state: s, prepGrace: false, satAdjust: BAL.SIDE_SAT.MISSING });
+  check('missing side dents satisfaction', spec.satisfaction - missing.satisfaction >= 4);
+
+  // decor: queue/patience cap at 3 tiers, then charm buffs take over
+  const d = newGame();
+  d.upgrades.decor = 6;
+  const dBase = newGame(); dBase.upgrades.decor = 3;
+  const { queueSlots, patienceMult, tipMult, customersForDay } = await import('../src/state.js');
+  check('queue slots cap at decor 3', queueSlots(d) === queueSlots(dBase));
+  check('patience caps at decor 3', patienceMult(d) === patienceMult(dBase));
+  check('high decor buffs tips', tipMult(d) > tipMult(dBase));
+  check('high decor adds footfall', customersForDay(d) > customersForDay(dBase));
+  check('golden bell adds tips at L30', (() => { const g2 = newGame(); g2.level = 30; return tipMult(g2) > 1; })());
+}
+
 // ---- 9. XP / level spine ------------------------------------------------------
 console.log('xp & levels');
 {

@@ -7,6 +7,7 @@ import { BAL, TOPPING_ORDER } from '../balance.js';
 import { clamp, lerp, rand, randi, pick, Juice, Ease, rr } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { customersForDay, queueSlots, patienceMult, currentRating } from '../state.js';
+import { unlocked } from '../progress.js';
 
 const OUTLINE = '#4a2e1d';
 
@@ -52,10 +53,44 @@ export const Orders = {
     return list;
   },
 
+  // recipes the shop can actually make: level-unlocked + every component owned
+  availableRecipes(state) {
+    return Object.keys(BAL.RECIPES).filter(id => {
+      if (!unlocked(state, 'recipe', id)) return false;
+      const b = BAL.RECIPES[id].build;
+      if (b.size === 'L' && !state.sizeL) return false;
+      if (!state.sauces.includes(b.sauceType)) return false;
+      if (!state.crusts.includes(b.crust)) return false;
+      return b.toppings.every(t => state.toppings.includes(t.type));
+    });
+  },
+
+  recipeTicket(state, id) {
+    const b = BAL.RECIPES[id].build;
+    return {
+      size: b.size, sauce: b.sauce, cheese: b.cheese, bake: b.bake,
+      sauceType: b.sauceType, crust: b.crust,
+      toppings: b.toppings.map(t => ({ ...t })),
+      special: false,
+      specialty: id,
+    };
+  },
+
+  _rollTicket(state) {
+    const recipes = this.availableRecipes(state);
+    const t = recipes.length && Math.random() < BAL.RECIPE_CHANCE
+      ? this.recipeTicket(state, pick(recipes))
+      : this.makeTicket(state, (state.nextDay && state.nextDay.specials) || []);
+    if (state.sides.length && Math.random() < BAL.SIDE_CHANCE) {
+      t.side = pick(state.sides);
+    }
+    return t;
+  },
+
   _makeCustomer(state, i) {
     return {
       id: nextId++,
-      ticket: this.makeTicket(state, (state.nextDay && state.nextDay.specials) || []),
+      ticket: this._rollTicket(state),
       regular: null,
       colors: {
         skin: pick(SKINS), shirt: pick(SHIRTS), hair: pick(HAIRS),
@@ -253,10 +288,12 @@ export const Orders = {
     const sauceChip = showVariant
       ? `<span class="tk-chip lv-${t.sauce}"><span class="tk-saucedot" style="background:${BAL.SAUCES[t.sauceType || 'tomato'].color}"></span>${t.sauce} ${BAL.SAUCES[t.sauceType || 'tomato'].label}</span>`
       : `<span class="tk-chip lv-${t.sauce}">${t.sauce}</span>`;
+    const recipe = t.specialty ? BAL.RECIPES[t.specialty] : null;
     el.innerHTML = `
       <div class="tk-pin"></div>
       <div class="tk-head">ORDER <span>#${svc.orderIndex}</span></div>
       ${c.regular ? `<div class="tk-reg">⭐ for ${c.regular.name}</div>` : ''}
+      ${recipe ? `<div class="tk-recipe">🍕 ${recipe.name} · +${Math.round(recipe.premium * 100)}%</div>` : ''}
       ${t.special ? `<div class="tk-special">★ today's special · +${Math.round(BAL.SPECIALS.PRICE_PREMIUM * 100)}%</div>` : ''}
       <div class="tk-row"><span class="tk-lbl">SIZE</span><span class="tk-chip tk-size">${t.size}</span></div>
       ${showCrust ? `<div class="tk-row"><span class="tk-lbl">CRUST</span><span class="tk-chip ck-${t.crust || 'classic'}">${BAL.CRUSTS[t.crust || 'classic'].label.toLowerCase()}</span></div>` : ''}
@@ -265,7 +302,8 @@ export const Orders = {
       <div class="tk-sep"></div>
       ${tops}
       <div class="tk-sep"></div>
-      <div class="tk-row"><span class="tk-lbl">BAKE</span><span class="tk-chip bk-${t.bake}">${t.bake === 'well' ? 'well-done' : t.bake}</span></div>`;
+      <div class="tk-row"><span class="tk-lbl">BAKE</span><span class="tk-chip bk-${t.bake}">${t.bake === 'well' ? 'well-done' : t.bake}</span></div>
+      ${t.side ? `<div class="tk-sideorder">+ ${BAL.SIDES[t.side].name}</div>` : ''}`;
     el.classList.remove('hidden', 'ticket-out');
     el.classList.remove('ticket-in');
     void el.offsetWidth;            // restart the slide-in animation

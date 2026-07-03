@@ -149,6 +149,28 @@ export const ShopScene = {
 
   _equipmentTab(g, grid) {
     const s = g.state;
+    // side stations — one-off purchases that add a bench to the counter
+    for (const key of Object.keys(BAL.SIDES)) {
+      const def = BAL.SIDES[key];
+      const owned = s.sides.includes(key);
+      const gate = unlockLevel('side', key);
+      const stockDef = BAL.SIDE_STOCK[def.stockKey];
+      grid.appendChild(this._card({
+        title: key === 'garlicbread' ? 'Counter Toaster' : 'Drinks Fridge',
+        desc: owned
+          ? `${def.name} orders now appear on tickets — quick, high-margin add-ons.`
+          : `Serve ${def.name} (${gbp(def.price)} a pop). Uses its own stock (${stockDef.label.toLowerCase()}); some tickets will add one.`,
+        cost: owned ? null : def.cost,
+        owned,
+        afford: !owned && s.money >= def.cost,
+        buyLabel: 'INSTALL',
+        lockLevel: !owned && s.level < gate ? gate : null,
+        onBuy: () => this._buy(g, def.cost, () => {
+          s.sides.push(key);
+          addStock(s, def.stockKey, 12);
+        }, `side:${key}`),
+      }));
+    }
     for (const key of Object.keys(BAL.UPGRADES)) {
       const u = BAL.UPGRADES[key];
       const tier = s.upgrades[key];
@@ -340,6 +362,15 @@ export const ShopScene = {
     for (const key of TOPPING_ORDER) {
       if (!s.toppings.includes(key)) continue;
       list.appendChild(this._restockRow(g, key));
+    }
+    // side stock, once a station is installed
+    const sideKeys = s.sides.map(k => BAL.SIDES[k].stockKey);
+    if (sideKeys.length) {
+      const sideHead = document.createElement('div');
+      sideHead.className = 'rs-section-head';
+      sideHead.textContent = 'SIDES';
+      list.appendChild(sideHead);
+      for (const key of sideKeys) list.appendChild(this._restockRow(g, key));
     }
     grid.appendChild(list);
 

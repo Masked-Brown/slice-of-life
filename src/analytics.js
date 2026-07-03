@@ -66,6 +66,27 @@ export function analyticsHTML(state) {
       </div>`;
   }).join('');
 
+  // sides: their own little P&L, same shape as toppings
+  const sideRows = state.sides.map(sk => {
+    const def = BAL.SIDES[sk];
+    const stockKey = def.stockKey;
+    const used = d.used[stockKey] || 0;
+    const rev = (d.sideRevenue || {})[sk] || 0;
+    const cost = used * unitCost(state, stockKey);
+    const w = waste[stockKey] || null;
+    const margin = rev - cost - (w ? w.cost : 0);
+    return `
+      <div class="an-row an-basic-row">
+        <span class="an-name"><span class="tk-dot" style="background:${BAL.SIDE_STOCK[stockKey].dot}"></span>${def.name}</span>
+        <span class="an-used">×${used}</span>
+        <span class="an-bar an-bar-empty">keeps ${shelfLife(stockKey)}d</span>
+        <span class="an-num">${gbp(rev)}</span>
+        <span class="an-num an-cost">−${gbp(cost)}</span>
+        ${wasteCell(w)}
+        <span class="an-num ${margin >= 0 ? 'an-pos' : 'an-neg'}">${margin >= 0 ? '+' : '−'}${gbp(Math.abs(margin))}</span>
+      </div>`;
+  }).join('');
+
   return `
     <div class="an-panel">
       <div class="an-title">DAY ${d.day} — THE BOOKS</div>
@@ -93,6 +114,7 @@ export function analyticsHTML(state) {
           <span class="an-num">Supply</span><span class="an-num">Waste</span><span class="an-num"></span>
         </div>
         ${basicsRows}
+        ${sideRows}
       </div>
       ${gradesLine(state, d)}
       <div class="an-hint">${wasteCost > 0.005
