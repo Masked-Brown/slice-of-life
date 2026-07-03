@@ -208,6 +208,44 @@ export const ShopScene = {
         }, t.label),
       }));
     }
+    // sauce variants — one-off purchases, share the sauce-base stock
+    for (const key of Object.keys(BAL.SAUCES)) {
+      const v = BAL.SAUCES[key];
+      if (v.cost === 0) continue;
+      const owned = s.sauces.includes(key);
+      const gate = unlockLevel('sauce', key);
+      grid.appendChild(this._card({
+        title: `${v.label} Sauce`,
+        dot: v.color,
+        desc: owned ? 'In the pot — click the pot at the sauce station to switch.'
+                    : 'A second base for the pot. Tickets start asking for it tomorrow — read them twice.',
+        cost: owned ? null : v.cost,
+        owned,
+        afford: !owned && s.money >= v.cost,
+        buyLabel: 'ADD',
+        lockLevel: !owned && s.level < gate ? gate : null,
+        onBuy: () => this._buy(g, v.cost, () => { s.sauces.push(key); }, `sauce:${key}`),
+      }));
+    }
+    // crusts
+    for (const key of Object.keys(BAL.CRUSTS)) {
+      const c = BAL.CRUSTS[key];
+      if (c.cost === 0) continue;
+      const owned = s.crusts.includes(key);
+      const gate = unlockLevel('crust', key);
+      const bakeNote = c.bakeMult < 1 ? 'Bakes faster — watch the meter.' : 'Bakes slower, charges a premium.';
+      grid.appendChild(this._card({
+        title: `${c.label} Crust`,
+        desc: owned ? 'On the menu — pick it on the dough tray.'
+                    : `${bakeNote} +${gbp(c.priceAdd)} on every ${c.label.toLowerCase()}-crust order.`,
+        cost: owned ? null : c.cost,
+        owned,
+        afford: !owned && s.money >= c.cost,
+        buyLabel: 'ADD',
+        lockLevel: !owned && s.level < gate ? gate : null,
+        onBuy: () => this._buy(g, c.cost, () => { s.crusts.push(key); }, `crust:${key}`),
+      }));
+    }
   },
 
   // ---- restock: the supply decision ------------------------------------
@@ -225,10 +263,16 @@ export const ShopScene = {
     const dying = expiringTomorrow(s, key);
     const shelf = shelfLife(key, s.grades[key] || 'standard');
     const specials = s.nextDay.specials;
+    const graded = BAL.GRADED.includes(key) && unlocked(s, 'grades', 'grades');
+    const gradeBtns = graded ? `<span class="rs-grades">${Object.keys(BAL.GRADES).map(gk =>
+      `<button class="rs-grade ${s.grades[key] === gk ? 'rs-grade-on' : ''}" data-grade="${gk}"
+        title="${BAL.GRADES[gk].label}: ×${BAL.GRADES[gk].costMult} cost, ${BAL.GRADES[gk].satBonus >= 0 ? '+' : ''}${BAL.GRADES[gk].satBonus} satisfaction${BAL.GRADES[gk].shelfDelta ? ', spoils sooner' : ''}"
+      >${BAL.GRADES[gk].label[0]}</button>`).join('')}</span>` : '';
     const row = document.createElement('div');
     row.className = 'rs-row';
     row.innerHTML = `
       <span class="rs-name"><span class="tk-dot" style="background:${def.dot}"></span>${def.label}
+        ${gradeBtns}
         ${specials.includes(key) ? '<span class="rs-special">★ special</span>' : ''}
         ${dying > 0 ? `<span class="rs-dying">⌛ ×${dying} tonight</span>` : ''}</span>
       <span class="rs-stock ${stock === 0 ? 'rs-out' : low ? 'rs-low' : ''}">×${stock}</span>
@@ -236,6 +280,15 @@ export const ShopScene = {
       <span class="rs-shelf">${shelf === Infinity ? '—' : 'keeps ' + shelf + 'd'}</span>
       <span class="rs-price">${disc > 0 ? `<s>${Math.round(def.unit * 100)}p</s> ` : ''}${Math.round(cost * 100)}p</span>
       <span class="rs-btns"></span>`;
+    // grade toggle: future purchases stamp this grade onto their batches
+    row.querySelectorAll('.rs-grade').forEach(b => {
+      b.addEventListener('click', () => {
+        s.grades[key] = b.dataset.grade;
+        saveGame(s);
+        Sfx.tick();
+        this._renderTab(g);
+      });
+    });
     const btns = row.querySelector('.rs-btns');
     for (const n of (opts.basic ? BAL.STOCK.BUY_AMOUNTS_BASICS : BAL.STOCK.BUY_AMOUNTS)) {
       const price = cost * n;

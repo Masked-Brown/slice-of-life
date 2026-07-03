@@ -117,7 +117,8 @@ export const Oven = {
 
     if (!ov.has) return;
     const tier = svc.state.upgrades.oven;
-    ov.prog = Math.min(1, ov.prog + dt / BAL.OVEN.BAKE_TIME[tier]);
+    const crustMult = svc.pizza && BAL.CRUSTS[svc.pizza.crust] ? BAL.CRUSTS[svc.pizza.crust].bakeMult : 1;
+    ov.prog = Math.min(1, ov.prog + dt / (BAL.OVEN.BAKE_TIME[tier] * crustMult));
     if (svc.pizza) svc.pizza.bake = ov.prog;
 
     const z = this.zones(tier);

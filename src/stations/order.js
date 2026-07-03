@@ -79,6 +79,8 @@ export const Orders = {
     c.colors = { skin: r.skin, shirt: r.shirt, hair: r.hair, hat: r.hat };
     c.ticket = {
       size: r.fav.size, sauce: r.fav.sauce, cheese: r.fav.cheese, bake: r.fav.bake,
+      sauceType: r.fav.sauceType || 'tomato',
+      crust: r.fav.crust || 'classic',
       toppings: r.fav.toppings.map(t => ({ ...t })),
       special: false,
     };
@@ -112,9 +114,26 @@ export const Orders = {
       sauce: pick(['light', 'normal', 'heavy']),
       cheese: pick(['light', 'normal', 'heavy']),
       bake: pick(['light', 'normal', 'well']),
+      sauceType: this._pickDim(state.sauces, 'tomato', BAL.TICKET_WEIGHTS.SAUCE_DEFAULT),
+      crust: this._pickDim(state.crusts, 'classic', BAL.TICKET_WEIGHTS.CRUST_DEFAULT),
       toppings: chosen.map(type => ({ type, count: randi(lo, hi) })),
       special: chosen.some(t => specials.includes(t)),
     };
+  },
+
+  // weighted pick over an owned dimension: the default stays most common
+  _pickDim(owned, def, defWeight) {
+    if (!owned || owned.length <= 1) return def;
+    const total = defWeight + (owned.length - 1);
+    let r = Math.random() * total;
+    if (r < defWeight) return def;
+    r -= defWeight;
+    for (const k of owned) {
+      if (k === def) continue;
+      if (r < 1) return k;
+      r -= 1;
+    }
+    return def;
   },
 
   arrivalGap(state) {
@@ -228,13 +247,20 @@ export const Orders = {
          <span class="tk-dot" style="background:${BAL.TOPPINGS[w.type].dot}"></span>
          <b>${w.count}×</b>&nbsp;${BAL.TOPPINGS[w.type].label}
        </div>`).join('');
+    const state = svc.state;
+    const showCrust = state.crusts.length > 1 || (t.crust && t.crust !== 'classic');
+    const showVariant = state.sauces.length > 1 || (t.sauceType && t.sauceType !== 'tomato');
+    const sauceChip = showVariant
+      ? `<span class="tk-chip lv-${t.sauce}"><span class="tk-saucedot" style="background:${BAL.SAUCES[t.sauceType || 'tomato'].color}"></span>${t.sauce} ${BAL.SAUCES[t.sauceType || 'tomato'].label}</span>`
+      : `<span class="tk-chip lv-${t.sauce}">${t.sauce}</span>`;
     el.innerHTML = `
       <div class="tk-pin"></div>
       <div class="tk-head">ORDER <span>#${svc.orderIndex}</span></div>
       ${c.regular ? `<div class="tk-reg">⭐ for ${c.regular.name}</div>` : ''}
       ${t.special ? `<div class="tk-special">★ today's special · +${Math.round(BAL.SPECIALS.PRICE_PREMIUM * 100)}%</div>` : ''}
       <div class="tk-row"><span class="tk-lbl">SIZE</span><span class="tk-chip tk-size">${t.size}</span></div>
-      <div class="tk-row"><span class="tk-lbl">SAUCE</span><span class="tk-chip lv-${t.sauce}">${t.sauce}</span></div>
+      ${showCrust ? `<div class="tk-row"><span class="tk-lbl">CRUST</span><span class="tk-chip ck-${t.crust || 'classic'}">${BAL.CRUSTS[t.crust || 'classic'].label.toLowerCase()}</span></div>` : ''}
+      <div class="tk-row"><span class="tk-lbl">SAUCE</span>${sauceChip}</div>
       <div class="tk-row"><span class="tk-lbl">CHEESE</span><span class="tk-chip lv-${t.cheese}">${t.cheese}</span></div>
       <div class="tk-sep"></div>
       ${tops}

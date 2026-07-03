@@ -35,6 +35,8 @@ export const DayEndScene = {
       restockSpend,
       emergency: stats.emergency || 0,
       waste, wasteCost, wasteN,
+      gradeUplift: stats.gradeUplift || 0,
+      gradeUnits: stats.gradeUnits || {},
       satAvg: stats.satAvg, rating: stats.ratingAfter,
       used: stats.used, toppingRevenue: stats.toppingRevenue,
       goalHit: stats.goalHit, goalDesc: stats.goalDesc, goalReward: stats.goalReward,

@@ -81,13 +81,34 @@ export const Score = {
     return { frac, grade, burnt };
   },
 
-  // The whole order → money + satisfaction. `splats` = sauce counter splats.
-  scoreOrder({ pizza, ticket, elapsed, splats, state, prepGrace }) {
+  // satisfaction bonus from the supplier grades actually consumed this order
+  // (majority grade per graded ingredient; premium delights, budget shows)
+  gradeSatBonus(orderGrades) {
+    if (!orderGrades) return 0;
+    let bonus = 0;
+    for (const key in orderGrades) {
+      if (!BAL.GRADED.includes(key)) continue;
+      let top = 'standard', n = 0;
+      for (const g in orderGrades[key]) {
+        if (orderGrades[key][g] > n) { n = orderGrades[key][g]; top = g; }
+      }
+      bonus += BAL.GRADES[top].satBonus;
+    }
+    return clamp(bonus, BAL.SCORE.GRADE_BONUS_MIN, BAL.SCORE.GRADE_BONUS_MAX);
+  },
+
+  // The whole order → money + satisfaction. `splats` = sauce counter splats,
+  // `gradeBonus` = satisfaction points from supplier grades consumed.
+  scoreOrder({ pizza, ticket, elapsed, splats, state, prepGrace, gradeBonus = 0 }) {
     const S = BAL.SCORE, W = S.WEIGHTS, E = BAL.ECONOMY;
 
     const sizeFrac = pizza.size === ticket.size ? 1 : 0;
     const splatPen = Math.min(splats * S.SPLAT_PENALTY, S.SPLAT_PENALTY_MAX);
-    const sauceFrac = clamp(this.amountFrac(pizza.sauceCoverage, ticket.sauce) - splatPen / W.sauce, 0, 1);
+    let sauceFrac = clamp(this.amountFrac(pizza.sauceCoverage, ticket.sauce) - splatPen / W.sauce, 0, 1);
+    // wrong sauce variant: most of the station credit gone
+    if (ticket.sauceType && pizza.sauceType && pizza.sauceType !== ticket.sauceType) {
+      sauceFrac *= S.WRONG_SAUCE_MULT;
+    }
     const cheeseFrac = this.amountFrac(this.cheesePct(pizza), ticket.cheese);
     const top = this.toppingsResult(pizza, ticket);
     const bake = this.bakeResult(pizza.bakeZone, ticket.bake);
@@ -96,6 +117,9 @@ export const Score = {
       sizeFrac * W.size + sauceFrac * W.sauce + cheeseFrac * W.cheese +
       top.frac * W.toppings + bake.frac * W.bake;
 
+    if (ticket.crust && pizza.crust && pizza.crust !== ticket.crust) {
+      accuracy = Math.max(0, accuracy - S.CRUST_WRONG_PENALTY);
+    }
     if (prepGrace) accuracy = Math.min(100, accuracy + S.PREP_GRACE);
     const perfect = accuracy >= 99.5 && !bake.burnt;
     if (bake.burnt) accuracy *= S.BURNT_TOTAL_MULT;
@@ -104,31 +128,45 @@ export const Score = {
     const par = S.PAR_BASE + S.PAR_PER_TYPE * ticket.toppings.length;
     const over = clamp((elapsed - par) / (par * (S.PAR_FAIL_X - 1)), 0, 1);
     const speedK = 1 - over;
-    const satisfaction = Math.round(clamp(accuracy * lerp(S.SPEED_FLOOR, 1, speedK), 0, 100));
+    const sat0 = Math.round(clamp(accuracy * lerp(S.SPEED_FLOOR, 1, speedK), 0, 100));
+    const satisfaction = Math.round(clamp(sat0 + gradeBonus, 0, 100));
 
     // money — meta.mult is the prestige scaffold's single economy touchpoint
-    // (1.0 in V3 = no effect); pay, tip and analytics all flow from price
-    let price = (E.BASE_PRICE[ticket.size] + E.PRICE_PER_TOPPING_TYPE * ticket.toppings.length)
+    // (1.0 in V3 = no effect); pay, tip and analytics all flow from price.
+    // Exotic topping types and fancy crusts charge more.
+    const toppingPrice = ticket.toppings.reduce((a, w) => {
+      const def = BAL.TOPPINGS[w.type];
+      return a + E.PRICE_PER_TOPPING_TYPE + (def ? BAL.TIER_PRICE_ADD[def.tier] || 0 : 0);
+    }, 0);
+    const crustAdd = ticket.crust && BAL.CRUSTS[ticket.crust] ? BAL.CRUSTS[ticket.crust].priceAdd : 0;
+    let price = (E.BASE_PRICE[ticket.size] + toppingPrice + crustAdd)
       * priceMultiplier(state) * (state.meta ? state.meta.mult : 1);
     if (ticket.special) price *= 1 + BAL.SPECIALS.PRICE_PREMIUM;
-    const pay = price * lerp(E.SAT_MULT_MIN, E.SAT_MULT_MAX, satisfaction / 100);
-    let tipFrac = 0;
-    if (satisfaction >= E.TIP_START_SAT) {
-      if (satisfaction < E.TIP_KNEE_SAT) {
-        tipFrac = E.TIP_KNEE_FRAC * (satisfaction - E.TIP_START_SAT) / (E.TIP_KNEE_SAT - E.TIP_START_SAT);
-      } else {
-        const k = (satisfaction - E.TIP_KNEE_SAT) / (100 - E.TIP_KNEE_SAT);
-        tipFrac = E.TIP_KNEE_FRAC + (E.TIP_MAX_FRAC - E.TIP_KNEE_FRAC) * Math.pow(k, 1.2);
+
+    const moneyFor = sat => {
+      const pay = price * lerp(E.SAT_MULT_MIN, E.SAT_MULT_MAX, sat / 100);
+      let tipFrac = 0;
+      if (sat >= E.TIP_START_SAT) {
+        if (sat < E.TIP_KNEE_SAT) {
+          tipFrac = E.TIP_KNEE_FRAC * (sat - E.TIP_START_SAT) / (E.TIP_KNEE_SAT - E.TIP_START_SAT);
+        } else {
+          const k = (sat - E.TIP_KNEE_SAT) / (100 - E.TIP_KNEE_SAT);
+          tipFrac = E.TIP_KNEE_FRAC + (E.TIP_MAX_FRAC - E.TIP_KNEE_FRAC) * Math.pow(k, 1.2);
+        }
       }
-    }
-    const tip = price * tipFrac;
+      return { pay, tip: price * tipFrac };
+    };
+    const { pay, tip } = moneyFor(satisfaction);
+    const base = moneyFor(sat0);
+    // what the grade bonus was actually worth, in money — analytics uses this
+    const gradeUplift = (pay + tip) - (base.pay + base.tip);
 
     let stars = 1;
     for (const [min, st] of S.STAR_THRESHOLDS) if (satisfaction >= min) { stars = st; break; }
 
     return {
       accuracy: Math.round(accuracy), satisfaction, perfect, burnt: bake.burnt,
-      pay, tip, stars, par, price, elapsed,
+      pay, tip, stars, par, price, elapsed, gradeUplift,
       breakdown: { sizeFrac, sauceFrac, cheeseFrac, topFrac: top.frac, bakeFrac: bake.frac },
     };
   },
@@ -150,6 +188,7 @@ export const Serve = {
     const res = Score.scoreOrder({
       pizza: svc.pizza, ticket: cust.ticket, elapsed,
       splats: svc.splatCount, state: svc.state, prepGrace,
+      gradeBonus: Score.gradeSatBonus(svc.orderGrades),
     });
 
     Sfx.bell();
@@ -175,8 +214,19 @@ export const Serve = {
     for (const t of pz.toppings) svc.usage[t.type] = (svc.usage[t.type] || 0) + 1;
     const satMult = lerp(E.SAT_MULT_MIN, E.SAT_MULT_MAX, res.satisfaction / 100);
     for (const w of cust.ticket.toppings) {
+      const def = BAL.TOPPINGS[w.type];
+      const typePrice = E.PRICE_PER_TOPPING_TYPE + (def ? BAL.TIER_PRICE_ADD[def.tier] || 0 : 0);
       svc.toppingRevenue[w.type] = (svc.toppingRevenue[w.type] || 0)
-        + E.PRICE_PER_TOPPING_TYPE * priceMultiplier(state) * satMult;
+        + typePrice * priceMultiplier(state) * satMult;
+    }
+    // grade bookkeeping for the "is premium worth it?" analytics line
+    svc.gradeUplift = (svc.gradeUplift || 0) + (res.gradeUplift || 0);
+    if (svc.orderGrades) {
+      svc.gradeUnits = svc.gradeUnits || {};
+      for (const key in svc.orderGrades) {
+        const slot = svc.gradeUnits[key] || (svc.gradeUnits[key] = {});
+        for (const g in svc.orderGrades[key]) slot[g] = (slot[g] || 0) + svc.orderGrades[key][g];
+      }
     }
 
     // nailing a regular's order earns a fat extra tip; their word counts double

@@ -61,6 +61,10 @@ export const BAL = {
     EXTRA_TYPE_PENALTY: 6,       // flat pts lost per topping type NOT on the ticket
     BAKE_ADJACENT_CREDIT: 0.5,   // fraction of bake pts for one zone off
     BURNT_TOTAL_MULT: 0.6,       // total accuracy × this when burnt (heavy penalty)
+    WRONG_SAUCE_MULT: 0.35,      // sauce station credit × this on wrong variant
+    CRUST_WRONG_PENALTY: 8,      // flat accuracy pts lost for the wrong crust
+    GRADE_BONUS_MIN: -6,         // grade satisfaction bonus clamp
+    GRADE_BONUS_MAX: 8,
     SPEED_FLOOR: 0.7,            // satisfaction × this at ≥2× par time
     PAR_BASE: 24,                // (s) par time base
     PAR_PER_TYPE: 6,             // (s) + per topping type
@@ -142,8 +146,39 @@ export const BAL = {
     ham:       { label: 'Ham',       cost: 170, unit: 0.16, dot: '#f48fb1', shelf: 4, tier: 'common' },
     pineapple: { label: 'Pineapple', cost: 220, unit: 0.18, dot: '#f6c945', shelf: 3, tier: 'premium' },
     chilli:    { label: 'Chilli',    cost: 280, unit: 0.20, dot: '#e53935', shelf: 5, tier: 'premium' },
+    // V3 expansion — commons are workhorses, premiums are margin plays,
+    // exotics are fragile darlings that only pay at volume
+    sweetcorn:  { label: 'Sweetcorn',  cost: 105,  unit: 0.07, dot: '#f7de6b', shelf: 6, tier: 'common' },
+    bacon:      { label: 'Bacon',      cost: 340,  unit: 0.22, dot: '#c96a52', shelf: 4, tier: 'premium' },
+    spinach:    { label: 'Spinach',    cost: 400,  unit: 0.16, dot: '#3e7d3a', shelf: 2, tier: 'premium' },
+    meatball:   { label: 'Meatball',   cost: 470,  unit: 0.28, dot: '#8a4b32', shelf: 3, tier: 'premium' },
+    anchovy:    { label: 'Anchovy',    cost: 540,  unit: 0.24, dot: '#7c93a6', shelf: 7, tier: 'premium' },
+    prosciutto: { label: 'Prosciutto', cost: 650,  unit: 0.45, dot: '#e88f9c', shelf: 3, tier: 'exotic' },
+    artichoke:  { label: 'Artichoke',  cost: 720,  unit: 0.38, dot: '#93a45a', shelf: 4, tier: 'exotic' },
+    goatcheese: { label: 'Goat Cheese', cost: 800, unit: 0.42, dot: '#f4f0e3', shelf: 2, tier: 'exotic' },
+    sundried:   { label: 'Sun-dried Tom.', cost: 880, unit: 0.36, dot: '#b23c22', shelf: 8, tier: 'exotic' },
+    truffle:    { label: 'Truffle',    cost: 1000, unit: 0.60, dot: '#4d4038', shelf: 2, tier: 'exotic' },
   },
+  // exotic pieces charge more per topping TYPE on the ticket
+  TIER_PRICE_ADD: { common: 0, premium: 0.8, exotic: 2.2 },
   SIZE_L_COST: 220,
+
+  // ---- Sauce variants & crusts (ticket dimensions) --------------------------
+  // Variants share the sauce-base stock pool; the pot cycles on click.
+  SAUCES: {
+    tomato: { label: 'Tomato', color: '#c23a1c', hi: '#d64822', cost: 0 },
+    bbq:    { label: 'BBQ',    color: '#7a4526', hi: '#8f5430', cost: 260 },
+    white:  { label: 'White',  color: '#efe6cf', hi: '#f7f0de', cost: 420 },
+  },
+  CRUSTS: {
+    classic: { label: 'Classic', cost: 0,   bakeMult: 1.0,  priceAdd: 0 },
+    thin:    { label: 'Thin',    cost: 300, bakeMult: 0.85, priceAdd: 1.0 },
+    stuffed: { label: 'Stuffed', cost: 520, bakeMult: 1.15, priceAdd: 2.5 },
+  },
+  TICKET_WEIGHTS: {
+    SAUCE_DEFAULT: 2.2,          // tomato this × more likely than each variant
+    CRUST_DEFAULT: 2.2,          // classic likewise
+  },
 
   // ---- Basics (dough / sauce base / cheese) — V3 stocked ingredients ------
   // Consumed 1 unit per pizza (flat, any size — forecasting stays "units ≈
@@ -340,7 +375,8 @@ export const BAL = {
     { id: 'perfect50',   label: '50 perfect pizzas',          stat: 'perfects',      target: 50,   reward: 130, ratingBump: 1 },
     { id: 'streak5',     label: '5 perfect pizzas in a row',  stat: 'bestStreak',    target: 5,    reward: 50,  ratingBump: 1 },
     { id: 'upgrades5',   label: 'Own 5 upgrade tiers',        stat: 'upgradesOwned', target: 5,    reward: 40 },
-    { id: 'allToppings', label: 'Unlock every topping',       stat: 'toppingsOwned', target: 8,    reward: 110 },
+    { id: 'toppings8',   label: 'Stock 8 topping bins',       stat: 'toppingsOwned', target: 8,    reward: 110 },
+    { id: 'allToppings', label: 'Unlock every topping',       stat: 'toppingsOwned', target: 18,   reward: 420 },
     { id: 'profit100',   label: 'A £100-profit day',          stat: 'bestDayProfit', target: 100,  reward: 50 },
   ],
   MILESTONE_MIN_RATINGS: 12,     // star milestones need this many rated customers

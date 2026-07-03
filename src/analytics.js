@@ -94,8 +94,32 @@ export function analyticsHTML(state) {
         </div>
         ${basicsRows}
       </div>
+      ${gradesLine(state, d)}
       <div class="an-hint">${wasteCost > 0.005
         ? 'Spoilage is money in the bin — buy closer to what tomorrow needs.'
         : 'Margins update with your supply deals — cheaper restocks, fatter margins.'}</div>
     </div>`;
+}
+
+// "is premium worth it at my volume?" — actual uplift earned vs the
+// surcharge paid for the non-standard units consumed today
+function gradesLine(state, d) {
+  const units = d.gradeUnits || {};
+  let surcharge = 0, offGrade = 0;
+  for (const key in units) {
+    for (const g in units[key]) {
+      if (g === 'standard') continue;
+      offGrade += units[key][g];
+      const delta = (BAL.GRADES[g].costMult - 1) * unitCost(state, key, 'standard');
+      surcharge += units[key][g] * delta;
+    }
+  }
+  if (offGrade === 0) return '';
+  const uplift = d.gradeUplift || 0;
+  const net = uplift - surcharge;
+  return `<div class="an-grades ${net >= 0 ? 'an-grades-good' : 'an-grades-bad'}">
+    Supplier grades: ${net >= 0 ? '+' : '−'}${gbp(Math.abs(net))} net today
+    (earned ${uplift >= 0 ? '+' : '−'}${gbp(Math.abs(uplift))} in satisfaction pay
+    ${surcharge >= 0 ? 'vs' : 'plus'} ${gbp(Math.abs(surcharge))} ${surcharge >= 0 ? 'surcharge' : 'saved on budget stock'})
+    — ${net >= 0 ? 'the grade is paying for itself.' : 'not paying for itself at this volume yet.'}</div>`;
 }

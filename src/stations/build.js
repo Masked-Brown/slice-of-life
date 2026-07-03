@@ -44,6 +44,13 @@ function rampColor(stops, t) {
 const CRUST_RAMP = [[238, 213, 160], [224, 178, 96], [178, 116, 44], [58, 40, 26]];
 const DOUGH_RAMP = [[245, 226, 180], [240, 210, 150], [216, 168, 96], [90, 64, 40]];
 
+// paint palettes per sauce variant (core / rim-dab gradient / simmer spots)
+const SAUCE_PAINT = {
+  tomato: { core: 'rgba(199,58,25,0.98)', dabHi: 'rgba(214,72,34,1)', dabMid: 'rgba(196,56,24,0.95)', dabEdge: 'rgba(158,38,14,0)', spot: 'rgba(158,38,14,0.5)' },
+  bbq:    { core: 'rgba(110,60,30,0.98)', dabHi: 'rgba(133,76,40,1)', dabMid: 'rgba(106,58,28,0.95)', dabEdge: 'rgba(78,40,18,0)', spot: 'rgba(70,36,16,0.55)' },
+  white:  { core: 'rgba(238,228,204,0.98)', dabHi: 'rgba(248,241,222,1)', dabMid: 'rgba(232,220,192,0.95)', dabEdge: 'rgba(206,190,158,0)', spot: 'rgba(202,186,152,0.55)' },
+};
+
 export const Build = {
 
   // ---- order lifecycle ----------------------------------------------------
@@ -59,6 +66,17 @@ export const Build = {
     svc._cheeseAcc = 0;
     svc._binShake = null;        // { type, t } — empty-bin feedback wobble
     svc.orderGrades = {};        // { key: {grade: count} } consumed this order
+    svc.sauceSel = 'tomato';     // pot selection (click the pot to cycle)
+    svc.crustSel = 'classic';    // dough-tray selection
+    svc._crustBtns = null;       // hit rects, rebuilt each render
+  },
+
+  // owned sauces / crusts in canonical order
+  ownedSauces(svc) {
+    return Object.keys(BAL.SAUCES).filter(k => svc.state.sauces.includes(k));
+  },
+  ownedCrusts(svc) {
+    return Object.keys(BAL.CRUSTS).filter(k => svc.state.crusts.includes(k));
   },
 
   // consume one unit of a basic (dough/sauce/cheese). Never blocks: at zero
@@ -122,6 +140,7 @@ export const Build = {
   spawnDough(svc, size) {
     const ball = DOUGH_BALLS.find(b => b.size === size);
     const pz = this.makePizza(size);
+    pz.crust = svc.crustSel || 'classic';
     pz.x = ball.x; pz.y = ball.y;
     pz.scale = (ball.r * 2) / (pz.R * 2);
     pz.state = 'arc';
@@ -200,8 +219,9 @@ export const Build = {
       const a = rand(0, Math.PI * 2);
       const sx = pz.x + Math.cos(a) * (pz.R * 1.08 + rand(4, 30));
       const sy = clamp(pz.y + Math.sin(a) * (pz.R * 0.8 + rand(4, 26)), 210, 575);
-      if (svc.splats.length < 14) svc.splats.push({ x: sx, y: sy, r: rand(8, 15), rot: rand(0, 6) });
-      Juice.splat(sx, sy, '#c23a1c', 5);
+      const col = (BAL.SAUCES[pz.sauceType] || BAL.SAUCES.tomato).color;
+      if (svc.splats.length < 14) svc.splats.push({ x: sx, y: sy, r: rand(8, 15), rot: rand(0, 6), color: col });
+      Juice.splat(sx, sy, col, 5);
       Sfx.pat();
     }
   },
@@ -211,11 +231,12 @@ export const Build = {
     const rim = pz.R * BAL.PIZZA.SAUCE_RIM;
     const targetR = rim * Math.sqrt(svc._pourCov / 100);
     if (targetR < 3) return;
+    const P = SAUCE_PAINT[pz.sauceType] || SAUCE_PAINT.tomato;
     const c = pz.sauceCtx;
     c.save();
     c.beginPath(); c.arc(HALF, HALF, rim, 0, Math.PI * 2); c.clip();
     // solid wet core
-    c.fillStyle = 'rgba(199,58,25,0.98)';
+    c.fillStyle = P.core;
     c.beginPath(); c.arc(HALF, HALF, targetR * 0.98, 0, Math.PI * 2); c.fill();
     // organic rim dabs so the edge spreads unevenly, like real sauce
     for (let i = 0; i < 9; i++) {
@@ -224,16 +245,16 @@ export const Build = {
       const dabR = Math.max(6, targetR * rand(0.12, 0.22));
       const dx = HALF + Math.cos(a) * r, dy = HALF + Math.sin(a) * r;
       const grad = c.createRadialGradient(dx, dy, dabR * 0.15, dx, dy, dabR);
-      grad.addColorStop(0, 'rgba(214,72,34,1)');
-      grad.addColorStop(0.75, 'rgba(196,56,24,0.95)');
-      grad.addColorStop(1, 'rgba(158,38,14,0)');
+      grad.addColorStop(0, P.dabHi);
+      grad.addColorStop(0.75, P.dabMid);
+      grad.addColorStop(1, P.dabEdge);
       c.fillStyle = grad;
       c.beginPath(); c.arc(dx, dy, dabR, 0, Math.PI * 2); c.fill();
     }
     // darker simmer spots for texture
     if (Math.random() < 0.35) {
       const a = rand(0, Math.PI * 2), r = targetR * Math.sqrt(Math.random()) * 0.8;
-      c.fillStyle = 'rgba(158,38,14,0.5)';
+      c.fillStyle = P.spot;
       c.beginPath();
       c.arc(HALF + Math.cos(a) * r, HALF + Math.sin(a) * r, rand(4, 9), 0, Math.PI * 2);
       c.fill();
@@ -284,6 +305,16 @@ export const Build = {
     }
 
     if (st === 'dough') {
+      // crust selector chips above the tray
+      if (svc._crustBtns) {
+        for (const cb of svc._crustBtns) {
+          if (x >= cb.x && x <= cb.x + cb.w && y >= cb.y && y <= cb.y + cb.h) {
+            svc.crustSel = cb.key;
+            Sfx.press();
+            return;
+          }
+        }
+      }
       for (const b of DOUGH_BALLS) {
         if (dist(x, y, b.x, b.y) < b.r + 14) {
           if (b.size === 'L' && !svc.state.sizeL) {
@@ -299,8 +330,25 @@ export const Build = {
         }
       }
     } else if (st === 'sauce') {
+      // clicking the pot cycles the sauce variant (before any pour lands)
+      if (dist(x, y, SAUCE_POT.x, SAUCE_POT.y) < SAUCE_POT.r + 8) {
+        const owned = this.ownedSauces(svc);
+        if (owned.length > 1) {
+          if (pz && pz.sauceCoverage > 0) {
+            Juice.floatText(SAUCE_POT.x, SAUCE_POT.y - 50, 'Already sauced!', { color: '#ff9b80', size: 15 });
+            Sfx.popOff();
+          } else {
+            svc.sauceSel = owned[(owned.indexOf(svc.sauceSel) + 1) % owned.length];
+            Juice.floatText(SAUCE_POT.x, SAUCE_POT.y - 50,
+              BAL.SAUCES[svc.sauceSel].label, { color: '#fff6e0', size: 16 });
+            Sfx.press();
+          }
+          return;
+        }
+      }
       // press & hold near the pizza to pour from the centre
       if (pz && dist(x, y, pz.x, pz.y) < pz.R * 1.35) {
+        if (!pz.sauceType) pz.sauceType = svc.sauceSel;
         svc._pouring = true;
         Sfx.sauceStart();
       }
@@ -509,7 +557,11 @@ export const Build = {
   // ---- stage evaluation (per-station feedback pops) -------------------------
   evalStage(svc) {
     const pz = svc.pizza, t = svc.ticket;
-    if (svc.stage === 'sauce') return Score.amountGrade(pz.sauceCoverage, t.sauce);
+    if (svc.stage === 'sauce') {
+      // wrong variant sinks the station no matter how neat the pour
+      if (t.sauceType && pz.sauceType && pz.sauceType !== t.sauceType) return 'off';
+      return Score.amountGrade(pz.sauceCoverage, t.sauce);
+    }
     if (svc.stage === 'cheese') return Score.amountGrade(Score.cheesePct(pz), t.cheese);
     if (svc.stage === 'toppings') return Score.toppingsResult(pz, t).grade;
     return 'good';
@@ -524,10 +576,20 @@ export const Build = {
     return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
   },
 
+  // bins stay at the V2 spot while ≤8 owned; past that the whole row
+  // compresses and slides left so every bin keeps a seat at the counter
   bins(svc) {
     const owned = TOPPING_ORDER.filter(t => svc.state.toppings.includes(t));
+    const n = owned.length;
+    let pitch = BIN_W + BIN_GAP;
+    let x0 = BINS_X0;
+    if (BINS_X0 + n * pitch > 1272) {
+      pitch = Math.floor((1272 - 10) / n);
+      x0 = 10;
+    }
+    const w = Math.min(BIN_W, pitch - 6);
     return owned.map((type, i) => ({
-      type, x: BINS_X0 + i * (BIN_W + BIN_GAP), y: BINS_Y, w: BIN_W, h: BIN_H,
+      type, x: x0 + i * pitch, y: BINS_Y, w, h: BIN_H,
     }));
   },
 
@@ -586,7 +648,8 @@ export const Build = {
   _renderSplats(svc, ctx) {
     ctx.save();
     for (const s of svc.splats) {
-      ctx.fillStyle = 'rgba(170,46,18,0.85)';
+      ctx.fillStyle = s.color || 'rgba(170,46,18,0.85)';
+      ctx.globalAlpha = 0.85;
       ctx.save();
       ctx.translate(s.x, s.y); ctx.rotate(s.rot);
       ctx.beginPath(); ctx.ellipse(0, 0, s.r, s.r * 0.7, 0, 0, Math.PI * 2); ctx.fill();
@@ -647,6 +710,30 @@ export const Build = {
     }
     ctx.globalAlpha = 1;
     this._stockChip(svc, ctx, 'dough', TRAY.x + 6, TRAY.y - 10);
+    this._renderCrustChips(svc, ctx, active);
+    ctx.restore();
+  },
+
+  // crust selector above the tray (once a second crust is owned)
+  _renderCrustChips(svc, ctx, active) {
+    const crusts = this.ownedCrusts(svc);
+    if (crusts.length < 2) { svc._crustBtns = null; return; }
+    const w = 66, h = 22, gap = 5;
+    const x0 = TRAY.x + 56, y = TRAY.y - 13;
+    svc._crustBtns = crusts.map((key, i) => ({ key, x: x0 + i * (w + gap), y, w, h }));
+    ctx.save();
+    ctx.globalAlpha = active ? 1 : 0.7;
+    ctx.font = '900 11px Trebuchet MS, system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const cb of svc._crustBtns) {
+      const on = svc.crustSel === cb.key;
+      rr(ctx, cb.x, cb.y, cb.w, cb.h, 11);
+      ctx.fillStyle = on ? '#e2725b' : '#e6d3ac';
+      ctx.fill();
+      ctx.lineWidth = 2.5; ctx.strokeStyle = OUTLINE; ctx.stroke();
+      ctx.fillStyle = on ? '#fff6e8' : '#4a2e1d';
+      ctx.fillText(BAL.CRUSTS[cb.key].label.toUpperCase(), cb.x + cb.w / 2, cb.y + cb.h / 2 + 0.5);
+    }
     ctx.restore();
   },
 
@@ -675,16 +762,24 @@ export const Build = {
   },
 
   _renderPotAndBox(svc, ctx) {
-    // sauce pot
+    // sauce pot — filled with the selected variant, click to cycle
+    const sauceCol = (BAL.SAUCES[svc.sauceSel] || BAL.SAUCES.tomato).color;
+    const multiSauce = this.ownedSauces(svc).length > 1;
     ctx.save();
     ctx.globalAlpha = svc.stage === 'sauce' ? 1 : 0.75;
     ctx.fillStyle = '#8d8d96';
     ctx.beginPath(); ctx.arc(SAUCE_POT.x, SAUCE_POT.y, SAUCE_POT.r, 0, Math.PI * 2); ctx.fill();
     ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE; ctx.stroke();
-    ctx.fillStyle = '#c23a1c';
+    ctx.fillStyle = sauceCol;
     ctx.beginPath(); ctx.arc(SAUCE_POT.x, SAUCE_POT.y, SAUCE_POT.r - 7, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,0.25)';
     ctx.beginPath(); ctx.ellipse(SAUCE_POT.x - 8, SAUCE_POT.y - 8, 10, 6, -0.6, 0, Math.PI * 2); ctx.fill();
+    if (multiSauce) {
+      ctx.fillStyle = '#fff6e0';
+      ctx.font = '900 11px Trebuchet MS, system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(`◂ ${BAL.SAUCES[svc.sauceSel].label.toUpperCase()} ▸`, SAUCE_POT.x, SAUCE_POT.y + SAUCE_POT.r + 15);
+    }
     if (svc.stage === 'sauce') {
       ctx.globalAlpha = 0.35 + 0.15 * Math.sin(svc.elapsed * 5);
       ctx.beginPath(); ctx.arc(SAUCE_POT.x, SAUCE_POT.y, SAUCE_POT.r + 5, 0, Math.PI * 2);
@@ -854,11 +949,13 @@ export const Build = {
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(`×${stock}`, b.x + 24, b.y + 14 + lift);
 
-      // label + needed count chip
+      // label + needed count chip (narrow bins get short labels)
+      let label = BAL.TOPPINGS[b.type].label;
+      if (b.w < 90) label = label.split(' ')[0].slice(0, 8).replace(/-$/, '');
       ctx.fillStyle = '#fffbef';
-      ctx.font = '800 12px Trebuchet MS, system-ui, sans-serif';
+      ctx.font = `800 ${b.w < 90 ? 10 : 12}px Trebuchet MS, system-ui, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(BAL.TOPPINGS[b.type].label, b.x + b.w / 2, b.y + b.h - 12 + lift);
+      ctx.fillText(label, b.x + b.w / 2, b.y + b.h - 12 + lift);
 
       if (active) {
         const need = this._needed(svc, b.type);
@@ -905,16 +1002,16 @@ export const Build = {
 
     if (svc.stage === 'sauce') {
       const pz = svc.pizza;
+      const pourCol = (BAL.SAUCES[(pz && pz.sauceType) || svc.sauceSel] || BAL.SAUCES.tomato).color;
       // pour stream: sauce drops fall from the ladle toward the pizza centre
       if (svc._pouring && pz) {
         ctx.save();
-        const tip = svc._pouring ? 0.35 : 0;   // ladle tilts while pouring
         for (let i = 0; i < 3; i++) {
           const k = ((svc.elapsed * 2.4) + i / 3) % 1;
           const dx = lerp(p.x + 10, pz.x, k);
           const dy = lerp(p.y + 16, pz.y, k);
           ctx.globalAlpha = 0.9 - k * 0.3;
-          ctx.fillStyle = '#c23a1c';
+          ctx.fillStyle = pourCol;
           ctx.beginPath(); ctx.arc(dx, dy, 5.5 - k * 2.5, 0, Math.PI * 2); ctx.fill();
         }
         ctx.restore();
@@ -929,7 +1026,7 @@ export const Build = {
       ctx.beginPath(); ctx.arc(0, 4, 16, 0, Math.PI * 2);
       ctx.fillStyle = '#8d8d96'; ctx.fill(); ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 4, 11, 0, Math.PI * 2);
-      ctx.fillStyle = '#c23a1c'; ctx.fill();
+      ctx.fillStyle = pourCol; ctx.fill();
       ctx.restore();
     } else if (svc.stage === 'cheese') {
       const pz = svc.pizza;
@@ -989,13 +1086,31 @@ export const Build = {
     sctx.save();
     sctx.translate(C, C);
 
-    // crust
+    // crust — the rim tells you the crust type at a glance
+    const rimFrac = pz.crust === 'thin' ? 0.95 : pz.crust === 'stuffed' ? 0.8 : 0.9;
     sctx.fillStyle = rampColor(CRUST_RAMP, b);
     sctx.beginPath(); sctx.arc(0, 0, pz.R, 0, Math.PI * 2); sctx.fill();
     sctx.lineWidth = 4; sctx.strokeStyle = OUTLINE; sctx.stroke();
+    // stuffed: cheesy pockets bulge around the rim
+    if (pz.crust === 'stuffed') {
+      sctx.fillStyle = rampColor(CRUST_RAMP, Math.min(1, b + 0.08));
+      for (let i = 0; i < 14; i++) {
+        const a = i / 14 * Math.PI * 2;
+        sctx.beginPath();
+        sctx.arc(Math.cos(a) * pz.R * 0.9, Math.sin(a) * pz.R * 0.9, pz.R * 0.11, 0, Math.PI * 2);
+        sctx.fill();
+      }
+      sctx.fillStyle = 'rgba(247,215,116,0.5)';
+      for (let i = 0; i < 14; i += 2) {
+        const a = (i + 0.5) / 14 * Math.PI * 2;
+        sctx.beginPath();
+        sctx.arc(Math.cos(a) * pz.R * 0.9, Math.sin(a) * pz.R * 0.9, pz.R * 0.05, 0, Math.PI * 2);
+        sctx.fill();
+      }
+    }
     // inner base
     sctx.fillStyle = rampColor(DOUGH_RAMP, b);
-    sctx.beginPath(); sctx.arc(0, 0, pz.R * 0.9, 0, Math.PI * 2); sctx.fill();
+    sctx.beginPath(); sctx.arc(0, 0, pz.R * rimFrac, 0, Math.PI * 2); sctx.fill();
 
     // sauce
     sctx.drawImage(pz.sauceCanvas, -HALF, -HALF);
@@ -1177,6 +1292,175 @@ export function drawToppingShape(ctx, type, x, y, rot = 0, s = 1, bake = 0, sy =
       ctx.closePath(); ctx.fill(); ctx.stroke();
       ctx.fillStyle = shade('#5f9e46', dk);
       ctx.beginPath(); ctx.arc(-R * 0.7, -R * 0.18, R * 0.22, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      break;
+    }
+    case 'sweetcorn': {
+      // cluster of plump kernels
+      ctx.fillStyle = shade('#f7de6b', dk);
+      for (const [px, py] of [[-6, -4], [6, -4], [0, 6]]) {
+        ctx.beginPath();
+        ctx.moveTo(px - 5, py - 4);
+        ctx.quadraticCurveTo(px, py - 9, px + 5, py - 4);
+        ctx.quadraticCurveTo(px + 5, py + 4, px, py + 6);
+        ctx.quadraticCurveTo(px - 5, py + 4, px - 5, py - 4);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.beginPath(); ctx.arc(-7, -6, 1.8, 0, Math.PI * 2); ctx.fill();
+      break;
+    }
+    case 'bacon': {
+      // wavy rasher with a fat streak
+      ctx.fillStyle = shade('#c96a52', dk);
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.9, -R * 0.45);
+      ctx.quadraticCurveTo(-R * 0.3, -R * 0.75, R * 0.2, -R * 0.45);
+      ctx.quadraticCurveTo(R * 0.7, -R * 0.2, R * 0.9, -R * 0.45 + R * 0.55);
+      ctx.lineTo(R * 0.75, R * 0.55);
+      ctx.quadraticCurveTo(R * 0.2, R * 0.2, -R * 0.35, R * 0.5);
+      ctx.quadraticCurveTo(-R * 0.85, R * 0.75 - R * 0.6, -R * 0.9, -R * 0.45);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = shade('#f0d3c0', dk);
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.7, -R * 0.2);
+      ctx.quadraticCurveTo(0, -R * 0.45, R * 0.6, 0);
+      ctx.stroke();
+      break;
+    }
+    case 'spinach': {
+      // a leaf with a pale central vein
+      ctx.fillStyle = shade('#3e7d3a', dk);
+      ctx.beginPath();
+      ctx.moveTo(0, -R * 0.9);
+      ctx.quadraticCurveTo(R * 0.75, -R * 0.4, R * 0.35, R * 0.5);
+      ctx.quadraticCurveTo(R * 0.1, R * 0.85, 0, R * 0.9);
+      ctx.quadraticCurveTo(-R * 0.1, R * 0.85, -R * 0.35, R * 0.5);
+      ctx.quadraticCurveTo(-R * 0.75, -R * 0.4, 0, -R * 0.9);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = shade('#8dc48a', dk);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, -R * 0.6); ctx.lineTo(0, R * 0.7); ctx.stroke();
+      break;
+    }
+    case 'meatball': {
+      ctx.fillStyle = shade('#8a4b32', dk);
+      ctx.beginPath(); ctx.arc(0, 0, R * 0.8, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = shade('#6d3a25', dk);
+      for (const [px, py] of [[-4, 2], [5, -3], [1, 7], [-6, -5]]) {
+        ctx.beginPath(); ctx.arc(px, py, 2, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = 'rgba(255,235,210,0.5)';
+      ctx.beginPath(); ctx.arc(-R * 0.25, -R * 0.3, R * 0.2, 0, Math.PI * 2); ctx.fill();
+      break;
+    }
+    case 'anchovy': {
+      // a curved silver sliver
+      ctx.fillStyle = shade('#7c93a6', dk);
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.9, R * 0.15);
+      ctx.quadraticCurveTo(-R * 0.2, -R * 0.55, R * 0.7, -R * 0.15);
+      ctx.lineTo(R * 0.9, R * 0.05);
+      ctx.quadraticCurveTo(R * 0.3, -R * 0.15, -R * 0.5, R * 0.4);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.6, R * 0.12);
+      ctx.quadraticCurveTo(-R * 0.05, -R * 0.32, R * 0.55, -R * 0.08);
+      ctx.stroke();
+      break;
+    }
+    case 'prosciutto': {
+      // a draped, ruffled slice with white marbling
+      ctx.fillStyle = shade('#e88f9c', dk);
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.85, -R * 0.3);
+      ctx.quadraticCurveTo(-R * 0.3, -R * 0.8, R * 0.4, -R * 0.5);
+      ctx.quadraticCurveTo(R * 0.9, -R * 0.2, R * 0.65, R * 0.35);
+      ctx.quadraticCurveTo(R * 0.2, R * 0.15, -R * 0.1, R * 0.5);
+      ctx.quadraticCurveTo(-R * 0.5, R * 0.75, -R * 0.7, R * 0.3);
+      ctx.quadraticCurveTo(-R * 0.95, 0, -R * 0.85, -R * 0.3);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,245,245,0.75)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.6, 0);
+      ctx.quadraticCurveTo(-R * 0.1, -R * 0.3, R * 0.45, -R * 0.15);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.4, R * 0.3);
+      ctx.quadraticCurveTo(R * 0.05, R * 0.05, R * 0.4, R * 0.15);
+      ctx.stroke();
+      break;
+    }
+    case 'artichoke': {
+      // fanned petals
+      ctx.fillStyle = shade('#93a45a', dk);
+      for (let i = -2; i <= 2; i++) {
+        ctx.save();
+        ctx.rotate(i * 0.42);
+        ctx.beginPath();
+        ctx.moveTo(0, R * 0.5);
+        ctx.quadraticCurveTo(-R * 0.28, -R * 0.1, 0, -R * 0.75);
+        ctx.quadraticCurveTo(R * 0.28, -R * 0.1, 0, R * 0.5);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.restore();
+      }
+      ctx.fillStyle = shade('#c9d19a', dk);
+      ctx.beginPath(); ctx.arc(0, R * 0.25, R * 0.22, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      break;
+    }
+    case 'goatcheese': {
+      // crumbly white dollop
+      ctx.fillStyle = shade('#f4f0e3', dk * 0.6);
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.6, R * 0.3);
+      ctx.quadraticCurveTo(-R * 0.75, -R * 0.25, -R * 0.15, -R * 0.55);
+      ctx.quadraticCurveTo(R * 0.35, -R * 0.75, R * 0.65, -R * 0.15);
+      ctx.quadraticCurveTo(R * 0.8, R * 0.35, R * 0.2, R * 0.5);
+      ctx.quadraticCurveTo(-R * 0.25, R * 0.65, -R * 0.6, R * 0.3);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(210,200,175,0.7)';
+      for (const [px, py] of [[-4, -2], [5, 3], [2, -6]]) {
+        ctx.beginPath(); ctx.arc(px, py, 2.2, 0, Math.PI * 2); ctx.fill();
+      }
+      break;
+    }
+    case 'sundried': {
+      // shriveled, folded red oval
+      ctx.fillStyle = shade('#b23c22', dk);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, R * 0.8, R * 0.55, 0.3, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = shade('#7e2413', dk);
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.55, -R * 0.1);
+      ctx.quadraticCurveTo(0, R * 0.15, R * 0.55, -R * 0.05);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.4, R * 0.25);
+      ctx.quadraticCurveTo(R * 0.05, R * 0.38, R * 0.4, R * 0.22);
+      ctx.stroke();
+      break;
+    }
+    case 'truffle': {
+      // dark irregular shavings
+      ctx.fillStyle = shade('#4d4038', dk);
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.8, R * 0.1);
+      ctx.lineTo(-R * 0.3, -R * 0.5);
+      ctx.lineTo(R * 0.25, -R * 0.35);
+      ctx.lineTo(R * 0.8, -R * 0.55);
+      ctx.lineTo(R * 0.6, R * 0.15);
+      ctx.lineTo(R * 0.05, R * 0.45);
+      ctx.lineTo(-R * 0.45, R * 0.35);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = 'rgba(214,196,170,0.6)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(-R * 0.5, 0); ctx.lineTo(R * 0.45, -R * 0.2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-R * 0.2, R * 0.25); ctx.lineTo(R * 0.35, R * 0.05); ctx.stroke();
       break;
     }
   }

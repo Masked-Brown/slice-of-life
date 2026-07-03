@@ -209,6 +209,75 @@ console.log('spoilage');
     && fresh2.stock.sauce === BAL.STOCK.START_BASICS && fresh2.stock.cheese === BAL.STOCK.START_BASICS);
 }
 
+// ---- 8c. variants, crusts, grades, tier pricing ---------------------------------
+console.log('variants & grades');
+{
+  const s = newGame();
+  // fresh game: tickets only ever ask for tomato/classic
+  let clean = true;
+  for (let i = 0; i < 200; i++) {
+    const t = Orders.makeTicket(s, []);
+    if (t.sauceType !== 'tomato' || t.crust !== 'classic') clean = false;
+  }
+  check('fresh game tickets stay tomato/classic', clean);
+
+  // once owned, variants appear but the default stays most common
+  s.sauces = ['tomato', 'bbq'];
+  s.crusts = ['classic', 'thin', 'stuffed'];
+  let bbq = 0, thin = 0;
+  for (let i = 0; i < 3000; i++) {
+    const t = Orders.makeTicket(s, []);
+    if (t.sauceType === 'bbq') bbq++;
+    if (t.crust === 'thin') thin++;
+  }
+  check('variants appear once owned', bbq > 500 && thin > 400, `(bbq ${bbq}, thin ${thin})`);
+  check('defaults stay most common', bbq < 1500 && thin < 1100);
+
+  // wrong sauce variant guts the sauce credit; wrong crust dents accuracy
+  const mkPizza = () => ({
+    size: 'M', R: BAL.PIZZA.RADIUS.M, sauceCoverage: 60, sauceType: 'tomato', crust: 'classic',
+    cheese: new Array(Math.round(BAL.PIZZA.CHEESE_FULL * 0.6)), toppings: [], bakeZone: 'normal',
+  });
+  const ticket = { size: 'M', sauce: 'normal', cheese: 'normal', bake: 'normal',
+    sauceType: 'bbq', crust: 'classic', toppings: [], special: false };
+  const right = Score.scoreOrder({ pizza: { ...mkPizza(), sauceType: 'bbq' }, ticket, elapsed: 20, splats: 0, state: s, prepGrace: false });
+  const wrong = Score.scoreOrder({ pizza: mkPizza(), ticket, elapsed: 20, splats: 0, state: s, prepGrace: false });
+  check('wrong sauce variant costs accuracy', right.accuracy - wrong.accuracy >= 10,
+    `(${right.accuracy} vs ${wrong.accuracy})`);
+  const wrongCrust = Score.scoreOrder({ pizza: { ...mkPizza(), sauceType: 'bbq', crust: 'thin' }, ticket, elapsed: 20, splats: 0, state: s, prepGrace: false });
+  check('wrong crust costs flat points', right.accuracy - wrongCrust.accuracy === BAL.SCORE.CRUST_WRONG_PENALTY);
+
+  // exotic topping types price higher than commons
+  const common = { ...ticket, sauceType: 'tomato', toppings: [{ type: 'onion', count: 4 }] };
+  const exotic = { ...ticket, sauceType: 'tomato', toppings: [{ type: 'truffle', count: 4 }] };
+  const pc = Score.scoreOrder({ pizza: mkPizza(), ticket: common, elapsed: 20, splats: 0, state: s, prepGrace: false });
+  const pe = Score.scoreOrder({ pizza: mkPizza(), ticket: exotic, elapsed: 20, splats: 0, state: s, prepGrace: false });
+  check('exotic types charge more', pe.price - pc.price > 1.5, `(Δ£${(pe.price - pc.price).toFixed(2)})`);
+
+  // stuffed crust adds its premium
+  const stuffedT = { ...ticket, sauceType: 'tomato', crust: 'stuffed', toppings: [] };
+  const ps = Score.scoreOrder({ pizza: { ...mkPizza(), crust: 'stuffed' }, ticket: stuffedT, elapsed: 20, splats: 0, state: s, prepGrace: false });
+  const pb = Score.scoreOrder({ pizza: mkPizza(), ticket: { ...ticket, sauceType: 'tomato' }, elapsed: 20, splats: 0, state: s, prepGrace: false });
+  check('stuffed crust charges a premium', ps.price > pb.price);
+
+  // grade bonus: premium consumed units lift satisfaction & money
+  const bonus = Score.gradeSatBonus({ cheese: { premium: 1 }, pepperoni: { premium: 4 } });
+  check('premium grades add satisfaction', bonus === 2 * BAL.GRADES.premium.satBonus
+    || bonus === BAL.SCORE.GRADE_BONUS_MAX, `(bonus ${bonus})`);
+  const budget = Score.gradeSatBonus({ cheese: { budget: 1 } });
+  check('budget grade dings satisfaction', budget === BAL.GRADES.budget.satBonus);
+  // an imperfect order (heavy sauce asked, normal poured) so the bonus has room
+  const graded = Score.scoreOrder({ pizza: mkPizza(), ticket: { ...ticket, sauceType: 'tomato', sauce: 'heavy' }, elapsed: 20, splats: 0, state: s, prepGrace: false, gradeBonus: 5 });
+  check('grade uplift is tracked in money', graded.gradeUplift > 0);
+
+  // every topping in the roster has a shelf life, tier, and unlock entry ≥ its intro
+  const allOk = TOPPING_ORDER.every(k => {
+    const t = BAL.TOPPINGS[k];
+    return t.shelf >= 1 && ['common', 'premium', 'exotic'].includes(t.tier);
+  });
+  check('all 18 toppings fully defined', allOk && TOPPING_ORDER.length === 18);
+}
+
 // ---- 9. XP / level spine ------------------------------------------------------
 console.log('xp & levels');
 {

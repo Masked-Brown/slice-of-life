@@ -390,6 +390,8 @@ export const ServiceScene = {
         used: svc.usage, toppingRevenue: svc.toppingRevenue,
         bonus: svc.bonusEarned,
         emergency: svc.emergencyCost,
+        gradeUplift: svc.gradeUplift || 0,
+        gradeUnits: svc.gradeUnits || {},
         xpToday: svc.xpToday,
         goalHit: !!svc.goal.hit,
         goalDesc: svc.goal.desc, goalReward: svc.goal.reward,
