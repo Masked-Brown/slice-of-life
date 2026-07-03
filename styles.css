@@ -539,6 +539,16 @@ html, body {
 }
 .rc-head span { font-size: 13px; color: #a3886a; letter-spacing: 1px; }
 .rc-lines { display: flex; flex-direction: column; gap: 6px; min-height: 124px; }
+.rc-event {
+  font-size: 13px;
+  font-weight: 800;
+  color: #5b3a20;
+  background: #fdf3dd;
+  border: 2px dashed var(--gold);
+  border-radius: 10px;
+  padding: 7px 12px;
+  line-height: 1.35;
+}
 .rc-row {
   display: flex;
   justify-content: space-between;
@@ -708,6 +718,7 @@ html, body {
   flex-wrap: wrap;
 }
 .shop-banner .tk-dot { margin: 0 2px 0 6px; }
+.shop-banner-event { background: #fbe0d2; border-color: var(--terracotta); color: #7a2c12; }
 .shop-grid-list { display: block; }
 
 /* ---- milestone toast (shop) -------------------------------------------- */
@@ -985,6 +996,25 @@ html, body {
 .db-ok { font-weight: 800; font-size: 13.5px; color: #2e7d44; }
 .db-buttons { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; }
 .db-buttons .btn-big { margin-left: auto; }
+.db-season {
+  text-align: center;
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--ink);
+  border: 2.5px dashed;
+  border-radius: 12px;
+  padding: 6px 12px;
+}
+.db-event {
+  font-weight: 800;
+  font-size: 14px;
+  color: #5b3a20;
+  background: #fdf3dd;
+  border: 2.5px solid var(--gold);
+  border-radius: 12px;
+  padding: 8px 14px;
+  line-height: 1.4;
+}
 .db-po { justify-content: space-between; }
 .db-po-desc { font-size: 13.5px; }
 .db-po-btn { font-size: 12px; padding: 5px 12px; border-radius: 9px; flex: none; }

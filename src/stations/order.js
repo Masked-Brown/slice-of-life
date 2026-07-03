@@ -8,6 +8,7 @@ import { clamp, lerp, rand, randi, pick, Juice, Ease, rr } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { customersForDay, queueSlots, patienceMult, currentRating } from '../state.js';
 import { unlocked } from '../progress.js';
+import { seasonActive } from '../seasons.js';
 
 const OUTLINE = '#4a2e1d';
 
@@ -28,7 +29,15 @@ export const Orders = {
 
   // ---- day generation -----------------------------------------------------
   generateDay(state) {
-    const total = customersForDay(state) + (state.boosts.ad ? BAL.BOOSTS.AD_EXTRA_CUSTOMERS : 0);
+    const ev = (state.nextDay && state.nextDay.event) || null;
+    const evDef = ev ? BAL.EVENTS.DEFS[ev.id] : null;
+    let total = customersForDay(state) + (state.boosts.ad ? BAL.BOOSTS.AD_EXTRA_CUSTOMERS : 0);
+    total += (state.criticBoost | 0);          // yesterday's rave review
+    state.criticBoost = 0;
+    if (evDef) {
+      if (evDef.extraCustomers) total += evDef.extraCustomers;
+      if (evDef.customersMult) total = Math.max(BAL.DAYS.MIN_CUSTOMERS, Math.round(total * evDef.customersMult));
+    }
     const R = BAL.REGULARS;
     const chance = clamp(
       R.CHANCE + (currentRating(state) - BAL.RATING.START) * R.RATING_CHANCE_BONUS,
@@ -58,17 +67,39 @@ export const Orders = {
         c.group = { tickets, idx: 0, results: [] };
         c.ticket = tickets[0];
         c.drainScale = 1 / BAL.GROUP.PATIENCE_MULT;  // patience scaled to the work
+        c.archetype = null;                    // the group IS the archetype
       }
       list.push(c);
+    }
+    // a marked visitor (critic / nonna / inspector) lands mid-day
+    if (evDef && ['critic', 'nonna', 'inspector'].includes(ev.id) && list.length) {
+      const idx = Math.min(list.length - 1,
+        Math.max(1, Math.floor(list.length * rand(0.4, 0.7))));
+      const c = list[idx];
+      if (!c.regular) {
+        c.role = ev.id;
+        c.group = null;
+        c.ticket = this.makeTicket(state, []);
+        delete c.ticket.side;
+        c.archetype = null;
+        if (ev.id === 'critic') c.drainScale = 1.15;
+      }
     }
     return list;
   },
 
-  // recipes the shop can actually make: level-unlocked + every component owned
+  // recipes the shop can actually make: level-unlocked + every component
+  // owned; seasonal specialties only while their season runs
   availableRecipes(state) {
+    const season = seasonActive(state);
     return Object.keys(BAL.RECIPES).filter(id => {
-      if (!unlocked(state, 'recipe', id)) return false;
-      const b = BAL.RECIPES[id].build;
+      const r = BAL.RECIPES[id];
+      if (r.seasonal) {
+        if (r.seasonal !== season) return false;
+      } else if (!unlocked(state, 'recipe', id)) {
+        return false;
+      }
+      const b = r.build;
       if (b.size === 'L' && !state.sizeL) return false;
       if (!state.sauces.includes(b.sauceType)) return false;
       if (!state.crusts.includes(b.crust)) return false;
@@ -88,8 +119,11 @@ export const Orders = {
   },
 
   _rollTicket(state) {
+    const evDef = state.nextDay && state.nextDay.event
+      ? BAL.EVENTS.DEFS[state.nextDay.event.id] : null;
     const recipes = this.availableRecipes(state);
-    const t = recipes.length && Math.random() < BAL.RECIPE_CHANCE
+    const recipeChance = BAL.RECIPE_CHANCE + (evDef && evDef.recipeChanceAdd || 0);
+    const t = recipes.length && Math.random() < recipeChance
       ? this.recipeTicket(state, pick(recipes))
       : this.makeTicket(state, (state.nextDay && state.nextDay.specials) || []);
     if (!t.specialty) {
@@ -111,17 +145,19 @@ export const Orders = {
         }
       }
     }
-    if (state.sides.length && Math.random() < BAL.SIDE_CHANCE) {
+    const sideChance = BAL.SIDE_CHANCE + (evDef && evDef.sideChanceAdd || 0);
+    if (state.sides.length && Math.random() < sideChance) {
       t.side = pick(state.sides);
     }
     return t;
   },
 
   _makeCustomer(state, i) {
-    return {
+    const c = {
       id: nextId++,
       ticket: this._rollTicket(state),
       regular: null,
+      archetype: null,
       colors: {
         skin: pick(SKINS), shirt: pick(SHIRTS), hair: pick(HAIRS),
         hat: Math.random() < 0.25,
@@ -135,6 +171,38 @@ export const Orders = {
       scale: 1,
       frontAt: null,
     };
+    this._rollArchetype(state, c);
+    return c;
+  },
+
+  // moods & personas — each with a silhouette the queue reads instantly
+  _rollArchetype(state, c) {
+    const A = BAL.ARCHETYPES;
+    const roll = Math.random();
+    let acc = 0;
+    const moodsOpen = unlocked(state, 'customer', 'moods');
+    const entries = [];
+    if (moodsOpen) entries.push('impatient', 'easygoing');
+    if (unlocked(state, 'customer', 'tourist')) entries.push('tourist');
+    if (unlocked(state, 'customer', 'vip')) entries.push('vip');
+    for (const key of entries) {
+      acc += A[key].chance;
+      if (roll < acc) {
+        c.archetype = key;
+        if (A[key].drain) c.drainScale = A[key].drain;
+        if (key === 'vip') c.colors = { ...c.colors, shirt: '#e8c46a', hat: false };
+        // tourists chase the specialties board
+        if (key === 'tourist' && Math.random() < A.tourist.specialtyBias) {
+          const recipes = this.availableRecipes(state);
+          if (recipes.length) {
+            const side = c.ticket.side;
+            c.ticket = this.recipeTicket(state, pick(recipes));
+            if (side) c.ticket.side = side;
+          }
+        }
+        return;
+      }
+    }
   },
 
   // a regular: fixed look, fixed signature order
@@ -164,14 +232,18 @@ export const Orders = {
 
   makeTicket(state, specials = []) {
     const O = BAL.ORDERS;
-    const sizes = state.sizeL && Math.random() < O.SIZE_L_CHANCE ? ['L'] : ['S', 'M'];
+    const evDef = state.nextDay && state.nextDay.event
+      ? BAL.EVENTS.DEFS[state.nextDay.event.id] : null;
+    const bigOrders = !!(evDef && evDef.bigOrders);
+    const sizes = state.sizeL && Math.random() < (bigOrders ? O.SIZE_L_CHANCE * 1.8 : O.SIZE_L_CHANCE)
+      ? ['L'] : ['S', 'M'];
     const size = pick(sizes);
     const maxTypes = Math.min(
-      1 + Math.floor((state.day - 1) / O.TYPES_PER_TICKET_DAY_DIV),
-      O.MAX_TYPES_PER_TICKET,
+      1 + Math.floor((state.day - 1) / O.TYPES_PER_TICKET_DAY_DIV) + (bigOrders ? 1 : 0),
+      O.MAX_TYPES_PER_TICKET + (bigOrders ? 1 : 0),
       state.toppings.length,
     );
-    const nTypes = randi(1, maxTypes);
+    const nTypes = bigOrders ? maxTypes : randi(1, maxTypes);
     // weighted pick: today's specials show up on far more tickets
     const pool = TOPPING_ORDER.filter(t => state.toppings.includes(t))
       .map(t => ({ t, w: specials.includes(t) ? BAL.SPECIALS.WEIGHT : 1 }));
@@ -213,9 +285,12 @@ export const Orders = {
 
   arrivalGap(state) {
     const D = BAL.DAYS;
+    const evDef = state.nextDay && state.nextDay.event
+      ? BAL.EVENTS.DEFS[state.nextDay.event.id] : null;
+    const gapMult = (evDef && evDef.gapMult) || 1;
     if (Math.random() < D.RUSH_CHANCE) return D.RUSH_GAP;
     const decay = Math.pow(D.GAP_DAY_DECAY, state.day - 1);
-    return Math.max(D.GAP_FLOOR, rand(D.GAP_BASE_MIN, D.GAP_BASE_MAX) * decay);
+    return Math.max(D.GAP_FLOOR * gapMult, rand(D.GAP_BASE_MIN, D.GAP_BASE_MAX) * decay * gapMult);
   },
 
   // ---- per-frame ------------------------------------------------------------
@@ -265,7 +340,7 @@ export const Orders = {
       // drainScale: groups drain slower (big order), pre-orders a touch faster
       if ((c.state === 'front' && svc.stage !== 'handoff') || c.state === 'queued') {
         const secs = (c.state === 'front' ? BAL.PATIENCE.FRONT_SECONDS : BAL.PATIENCE.QUEUE_SECONDS) * pm;
-        c.patience -= (dt / secs) * (c.drainScale || 1);
+        c.patience -= (dt / secs) * (c.drainScale || 1) * (svc.eventDrain || 1);
         if (c.patience <= 0) {
           this._stormOut(svc, c);
         }
@@ -459,19 +534,110 @@ export const Orders = {
       Juice.steam(x + rand(-14, 14), y - 52, 1);
     }
 
+    // ---- archetype & role silhouettes (read the queue at a glance) --------
+    ctx.lineWidth = 2.5; ctx.strokeStyle = OUTLINE;
+    if (c.archetype === 'impatient') {
+      // tapping foot
+      const tap = Math.abs(Math.sin(t * 7));
+      ctx.fillStyle = '#3a2a1c';
+      ctx.beginPath(); ctx.ellipse(14, 48 - tap * 5, 8, 3.5, 0, 0, Math.PI * 2); ctx.fill();
+      // permanent knit brows
+      ctx.strokeStyle = '#2b2118';
+      ctx.beginPath(); ctx.moveTo(-11, -31); ctx.lineTo(-3, -29); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(11, -31); ctx.lineTo(3, -29); ctx.stroke();
+    } else if (c.archetype === 'easygoing') {
+      // coffee cup in hand, gentle steam
+      ctx.fillStyle = '#fffbef';
+      ctx.fillRect(20, 8, 11, 13);
+      ctx.strokeRect(20, 8, 11, 13);
+      ctx.beginPath(); ctx.arc(31, 14, 4, -Math.PI / 2, Math.PI / 2); ctx.stroke();
+      if (Math.sin(t * 2) > 0.7) Juice.steam(x + 26, y - 2, 1);
+    } else if (c.archetype === 'tourist') {
+      // camera on a strap
+      ctx.strokeStyle = '#6b543c';
+      ctx.beginPath(); ctx.moveTo(-14, 2); ctx.quadraticCurveTo(0, 12, 14, 2); ctx.stroke();
+      ctx.fillStyle = '#4a4a52';
+      ctx.fillRect(-10, 10, 20, 13);
+      ctx.strokeStyle = OUTLINE; ctx.strokeRect(-10, 10, 20, 13);
+      ctx.fillStyle = '#9fd0e8';
+      ctx.beginPath(); ctx.arc(0, 16.5, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    } else if (c.archetype === 'vip') {
+      // top hat + a glint
+      ctx.fillStyle = '#2b2430';
+      ctx.fillRect(-13, -52, 26, 16);
+      ctx.fillRect(-18, -38, 36, 5);
+      ctx.strokeRect(-13, -52, 26, 16);
+      ctx.fillStyle = '#e8c46a';
+      ctx.fillRect(-13, -41, 26, 4);
+      if (Math.sin(t * 3) > 0.9) Juice.sparkle(x + rand(-14, 14), y - 40, 1);
+    }
+    if (c.role === 'critic') {
+      // monocle + notebook
+      ctx.strokeStyle = '#2b2118';
+      ctx.beginPath(); ctx.arc(7, -24, 6, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(11, -19); ctx.lineTo(14, -8); ctx.stroke();
+      ctx.fillStyle = '#fffbef';
+      ctx.fillRect(16, 6, 14, 18);
+      ctx.strokeStyle = OUTLINE; ctx.strokeRect(16, 6, 14, 18);
+      ctx.strokeStyle = '#a3886a';
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(18, 10 + i * 5); ctx.lineTo(28, 10 + i * 5); ctx.stroke(); }
+    } else if (c.role === 'nonna') {
+      // shawl + bun
+      ctx.fillStyle = '#b0b0b8';
+      ctx.beginPath(); ctx.arc(0, -40, 8, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = '#8d5a7c';
+      ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(0, -4, 24, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+    } else if (c.role === 'inspector') {
+      // clipboard + cap
+      ctx.fillStyle = '#5da9d6';
+      ctx.fillRect(-16, -44, 32, 8);
+      ctx.strokeStyle = OUTLINE; ctx.strokeRect(-16, -44, 32, 8);
+      ctx.fillStyle = '#e8c88a';
+      ctx.fillRect(16, 4, 15, 20);
+      ctx.strokeRect(16, 4, 15, 20);
+      ctx.fillStyle = '#fffbef';
+      ctx.fillRect(18, 7, 11, 14);
+    }
+    if (c.group) {
+      // a "×N" order slip in hand
+      ctx.fillStyle = '#fffbef';
+      ctx.fillRect(-30, 6, 16, 20);
+      ctx.strokeStyle = OUTLINE; ctx.strokeRect(-30, 6, 16, 20);
+      ctx.fillStyle = '#4a2e1d';
+      ctx.font = '900 10px Trebuchet MS, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`×${c.group.tickets.length}`, -22, 18);
+    }
+    if (c.preorder) {
+      // phone out, checking the time
+      ctx.fillStyle = '#2b2430';
+      ctx.fillRect(18, 6, 10, 17);
+      ctx.strokeStyle = OUTLINE; ctx.strokeRect(18, 6, 10, 17);
+      ctx.fillStyle = '#9fd0e8';
+      ctx.fillRect(20, 8, 6, 11);
+    }
+
     ctx.restore();
 
-    // regular's name tag above the patience arc
-    if (c.regular && c.state !== 'pending') {
+    // name tag above the patience arc: regulars, VIPs, marked visitors
+    const tag = c.regular ? c.regular.name
+      : c.role === 'critic' ? 'THE CRITIC'
+      : c.role === 'nonna' ? 'NONNA'
+      : c.role === 'inspector' ? 'INSPECTOR'
+      : c.archetype === 'vip' ? 'VIP'
+      : null;
+    if (tag && c.state !== 'pending') {
       ctx.save();
       ctx.font = '900 12px Trebuchet MS, system-ui, sans-serif';
-      const w = ctx.measureText(c.regular.name).width + 18;
+      const w = ctx.measureText(tag).width + 18;
       rr(ctx, x - w / 2, y - 94, w, 21, 10);
-      ctx.fillStyle = '#fffbef'; ctx.fill();
+      ctx.fillStyle = c.role ? '#fdeec0' : c.archetype === 'vip' ? '#f3e2b0' : '#fffbef';
+      ctx.fill();
       ctx.lineWidth = 2.5; ctx.strokeStyle = OUTLINE; ctx.stroke();
       ctx.fillStyle = '#4a2e1d';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(c.regular.name, x, y - 82.5);
+      ctx.fillText(tag, x, y - 82.5);
       ctx.restore();
     }
 

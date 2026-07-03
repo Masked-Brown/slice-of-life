@@ -168,6 +168,12 @@ export const BAL = {
     goatcheese: { label: 'Goat Cheese', cost: 800, unit: 0.42, dot: '#f4f0e3', shelf: 2, tier: 'exotic' },
     sundried:   { label: 'Sun-dried Tom.', cost: 880, unit: 0.36, dot: '#b23c22', shelf: 8, tier: 'exotic' },
     truffle:    { label: 'Truffle',    cost: 1000, unit: 0.60, dot: '#4d4038', shelf: 2, tier: 'exotic' },
+    // seasonal rotators — lent free while their season runs, then they
+    // cycle out (and back next year). Never purchasable; stock restockable.
+    basil:        { label: 'Basil',         cost: 0, unit: 0.14, dot: '#4e9b40', shelf: 2, tier: 'premium', seasonal: 'spring' },
+    cherrytomato: { label: 'Cherry Tomato', cost: 0, unit: 0.13, dot: '#e04c30', shelf: 3, tier: 'premium', seasonal: 'summer' },
+    pumpkin:      { label: 'Pumpkin',       cost: 0, unit: 0.15, dot: '#e07b39', shelf: 4, tier: 'premium', seasonal: 'spooky' },
+    cranberry:    { label: 'Cranberry',     cost: 0, unit: 0.16, dot: '#8e2440', shelf: 5, tier: 'premium', seasonal: 'winter' },
   },
   // exotic pieces charge more per topping TYPE on the ticket
   TIER_PRICE_ADD: { common: 0, premium: 0.8, exotic: 2.2 },
@@ -220,6 +226,19 @@ export const BAL = {
     latruffa:      { name: 'La Truffa',       premium: 0.45,
       build: { size: 'M', crust: 'thin', sauceType: 'white', sauce: 'light', cheese: 'normal', bake: 'light',
                toppings: [{ type: 'truffle', count: 3 }, { type: 'goatcheese', count: 4 }, { type: 'spinach', count: 4 }] } },
+    // seasonal specialties — on the menu only while their season runs
+    margheritafresca: { name: 'Margherita Fresca', premium: 0.24, seasonal: 'spring',
+      build: { size: 'M', crust: 'classic', sauceType: 'tomato', sauce: 'normal', cheese: 'heavy', bake: 'light',
+               toppings: [{ type: 'basil', count: 5 }] } },
+    estiva:           { name: 'Estiva',            premium: 0.26, seasonal: 'summer',
+      build: { size: 'M', crust: 'thin', sauceType: 'tomato', sauce: 'light', cheese: 'normal', bake: 'normal',
+               toppings: [{ type: 'cherrytomato', count: 5 }, { type: 'olive', count: 4 }] } },
+    jackolantern:     { name: "Jack o'Lantern",    premium: 0.28, seasonal: 'spooky',
+      build: { size: 'M', crust: 'classic', sauceType: 'bbq', sauce: 'normal', cheese: 'normal', bake: 'well',
+               toppings: [{ type: 'pumpkin', count: 5 }, { type: 'onion', count: 4 }] } },
+    festivefeast:     { name: 'Festive Feast',     premium: 0.30, seasonal: 'winter',
+      build: { size: 'M', crust: 'classic', sauceType: 'tomato', sauce: 'normal', cheese: 'heavy', bake: 'normal',
+               toppings: [{ type: 'cranberry', count: 4 }, { type: 'ham', count: 5 }] } },
   },
 
   // ---- Sides — rhythm breakers, not a second game ----------------------------
@@ -260,6 +279,66 @@ export const BAL = {
     THREE_CHANCE: 0.35,          // …of those, chance it's 3 pizzas (once unlocked)
     PREMIUM: 0.12,               // group total pays this much extra
     PATIENCE_MULT: 1.9,          // their patience pool scales to the workload
+  },
+
+  // ---- Customer archetypes (V3 — the queue reads at a glance) -----------------
+  ARCHETYPES: {
+    impatient: { chance: 0.13, drain: 1.4 },              // taps a foot, drains fast
+    easygoing: { chance: 0.13, drain: 0.62 },             // coffee in hand, all day
+    tourist:   { chance: 0.10, payMult: 1.1, specialtyBias: 0.5 },  // camera, loves the menu
+    vip:       { chance: 0.06, drain: 1.55, payMult: 1.7, tipMult: 2.2, ratingWeight: 2 },
+  },
+
+  // ---- Events — announced on the board, never a surprise ----------------------
+  EVENTS: {
+    BASE_CHANCE: 0.38,           // daily roll once any event type is unlocked
+    PITY_MAX_DRY: 4,             // guaranteed event within this many dry days
+    DEFS: {
+      rush:      { label: 'Rush Hour',        icon: '🔥',
+                   blurb: 'A mid-day surge — quicker arrivals, thinner patience, +25% on every order.',
+                   payMult: 1.25, patienceMult: 0.72, gapMult: 0.55, extraCustomers: 3 },
+      critic:    { label: 'Food Critic',      icon: '🧐',
+                   blurb: 'A reviewer eats here today. Their write-up moves stars — both ways.',
+                   graceSat: 90, failSat: 60, reward: 45, footfallBoost: 2 },
+      shortage:  { label: 'Supply Shortage',  icon: '📦',
+                   blurb: 'The market ran dry — one ingredient restocks at triple price tonight.',
+                   priceMult: 3 },
+      festival:  { label: 'Street Festival',  icon: '🎪',
+                   blurb: 'Crowds, music, appetites. More customers, more sides, party prices.',
+                   extraCustomers: 4, sideChanceAdd: 0.25, recipeChanceAdd: 0.12, payMult: 1.1 },
+      slow:      { label: 'Slow Morning',     icon: '🌤',
+                   blurb: 'A quiet one: few customers, deep patience, big fussy orders that pay.',
+                   customersMult: 0.55, patienceMult: 1.5, payMult: 1.15, bigOrders: true },
+      inspector: { label: 'Health Inspector', icon: '📋',
+                   blurb: 'An audit mid-service: counter mess and empty bins go in the report.',
+                   maxSplats: 4, reward: 40 },
+      nonna:     { label: "Nonna's Visit",    icon: '👵',
+                   blurb: 'Nonna is coming. She judges kindly, tips like a legend, misses nothing.',
+                   graceSat: 85, tipMult: 3 },
+      delivery:  { label: 'Surprise Delivery', icon: '🚚',
+                   blurb: 'A supplier mix-up in your favour: free stock this morning. It won’t keep forever.',
+                   kinds: 3, unitsMin: 8, unitsMax: 14 },
+    },
+    // seasonal mood: multiplies an event's roll weight during a season
+    SEASON_WEIGHTS: {
+      spring: { critic: 1.6, delivery: 1.4 },
+      summer: { festival: 2.2, rush: 1.4 },
+      spooky: { slow: 1.6, shortage: 1.5 },
+      winter: { nonna: 1.8, delivery: 1.4 },
+    },
+  },
+
+  // ---- Seasons — a rolling year; everything comes back --------------------------
+  SEASONS: {
+    LENGTH: 9,                   // days per season → 36-day year
+    ORDER: ['spring', 'summer', 'spooky', 'winter'],
+    LIST: {
+      spring: { label: 'Spring Bloom',  icon: '🌸', accent: '#e8b4c8', toppings: ['basil'],       recipe: 'margheritafresca' },
+      summer: { label: 'Summer Fest',   icon: '🌞', accent: '#f5c542', toppings: ['cherrytomato'], recipe: 'estiva' },
+      spooky: { label: 'Spooky Season', icon: '🎃', accent: '#e07b39', toppings: ['pumpkin'],     recipe: 'jackolantern' },
+      winter: { label: 'Winter Lights', icon: '❄️', accent: '#9fc6e8', toppings: ['cranberry'],   recipe: 'festivefeast' },
+    },
+    LENT_STOCK: 10,              // seasonal toppings arrive with this much stock
   },
 
   // ---- Phone pre-orders -----------------------------------------------------------

@@ -48,6 +48,8 @@ export function newGame(muted = false) {
     loyalty: {},                 // { regularKey: { serves } }
     mastery: {},                 // { recipeId: { perfects } }
     eventPity: { sinceEvent: 0 },
+    season: null,                // active season id (once the calendar unlocks)
+    criticBoost: 0,              // extra customers tomorrow after a rave review
     carriedRestockSpend: 0,      // £ spent restocking for the upcoming day
     milestonesDone: {},          // { milestoneId: true }
     nextDay: null,               // { day, specials, goal, event… } — goals.ensureNextDay
@@ -230,13 +232,19 @@ export function tipMult(state) {
 // whole UI reads; these helpers keep it in sync with the batch list.
 // =====================================================================
 
-// £/unit after supply discount; graded keys also carry their grade's cost
+// £/unit after supply discount; graded keys also carry their grade's cost.
+// A supply-shortage event triples tonight's price for its target.
 export function unitCost(state, key, grade = null) {
   const def = ING(key);
   if (!def) return 0;
   const disc = BAL.SUPPLY_DISCOUNTS[state.upgrades.supply] || 0;
   const g = BAL.GRADED.includes(key) ? (grade || state.grades[key] || 'standard') : 'standard';
-  return def.unit * (1 - disc) * BAL.GRADES[g].costMult;
+  let cost = def.unit * (1 - disc) * BAL.GRADES[g].costMult;
+  const ev = state.nextDay && state.nextDay.event;
+  if (ev && ev.id === 'shortage' && ev.target === key) {
+    cost *= BAL.EVENTS.DEFS.shortage.priceMult;
+  }
+  return cost;
 }
 
 // how many days a batch of `key` at `grade` keeps

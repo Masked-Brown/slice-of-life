@@ -1469,6 +1469,65 @@ export function drawToppingShape(ctx, type, x, y, rot = 0, s = 1, bake = 0, sy =
       ctx.stroke();
       break;
     }
+    case 'basil': {
+      // two bright little leaves
+      ctx.fillStyle = shade('#4e9b40', dk);
+      for (const [ox, oy, a] of [[-4, -2, -0.5], [5, 3, 0.7]]) {
+        ctx.save();
+        ctx.translate(ox, oy); ctx.rotate(a);
+        ctx.beginPath();
+        ctx.moveTo(0, -R * 0.55);
+        ctx.quadraticCurveTo(R * 0.42, -R * 0.1, 0, R * 0.5);
+        ctx.quadraticCurveTo(-R * 0.42, -R * 0.1, 0, -R * 0.55);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.restore();
+      }
+      break;
+    }
+    case 'cherrytomato': {
+      // glossy half, green calyx
+      ctx.fillStyle = shade('#e04c30', dk);
+      ctx.beginPath(); ctx.arc(0, 0, R * 0.65, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.beginPath(); ctx.arc(-R * 0.2, -R * 0.22, R * 0.16, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = shade('#5f9e46', dk);
+      for (let i = 0; i < 4; i++) {
+        const a = -Math.PI / 2 + (i - 1.5) * 0.5;
+        ctx.beginPath();
+        ctx.ellipse(Math.cos(a) * R * 0.3, -R * 0.45 + Math.sin(a) * R * 0.12, 4, 2, a, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case 'pumpkin': {
+      // a ridged roasted chunk
+      ctx.fillStyle = shade('#e07b39', dk);
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.7, R * 0.4);
+      ctx.quadraticCurveTo(-R * 0.85, -R * 0.3, -R * 0.2, -R * 0.6);
+      ctx.quadraticCurveTo(R * 0.4, -R * 0.85, R * 0.75, -R * 0.15);
+      ctx.quadraticCurveTo(R * 0.85, R * 0.4, R * 0.15, R * 0.55);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = shade('#b05a20', dk);
+      ctx.lineWidth = 2.2;
+      for (const k of [-0.3, 0.1, 0.5]) {
+        ctx.beginPath();
+        ctx.moveTo(-R * 0.5 + k * R, -R * 0.5);
+        ctx.quadraticCurveTo(-R * 0.35 + k * R, 0, -R * 0.45 + k * R, R * 0.45);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'cranberry': {
+      // a cluster of little dark berries
+      ctx.fillStyle = shade('#8e2440', dk);
+      for (const [px, py, r] of [[-5, -4, 5.5], [6, -2, 5], [0, 6, 5.5], [8, 7, 4]]) {
+        ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.beginPath(); ctx.arc(-6.5, -5.5, 1.8, 0, Math.PI * 2); ctx.fill();
+      break;
+    }
     case 'truffle': {
       // dark irregular shavings
       ctx.fillStyle = shade('#4d4038', dk);

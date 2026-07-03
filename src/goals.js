@@ -8,6 +8,7 @@ import { BAL, TOPPING_ORDER } from './balance.js';
 import { pick } from './juice.js';
 import { currentRating, pushRating } from './state.js';
 import { unlocked } from './progress.js';
+import { rollNextEvent } from './events.js';
 import { Orders } from './stations/order.js';
 
 // ---- next-day plan (specials + daily goal + pre-order offers) --------------
@@ -43,7 +44,10 @@ export function ensureNextDay(state) {
     }
   }
 
-  state.nextDay = { day: state.day, specials, goal, preorders };
+  // tomorrow's event (if any) — rolled now so restock can see it coming
+  const event = rollNextEvent(state);
+
+  state.nextDay = { day: state.day, specials, goal, preorders, event };
   return state.nextDay;
 }
 
@@ -58,7 +62,8 @@ export function metrics(state) {
     perfects: s.lifetimePerfects,
     bestStreak: s.bestPerfectStreak,
     upgradesOwned: Object.values(state.upgrades).reduce((a, b) => a + b, 0),
-    toppingsOwned: state.toppings.length,
+    // seasonal rotators don't count toward permanent-roster milestones
+    toppingsOwned: state.toppings.filter(t => BAL.TOPPINGS[t] && !BAL.TOPPINGS[t].seasonal).length,
     bestDayProfit: s.bestDayProfit,
   };
 }

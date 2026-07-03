@@ -270,12 +270,15 @@ console.log('variants & grades');
   const graded = Score.scoreOrder({ pizza: mkPizza(), ticket: { ...ticket, sauceType: 'tomato', sauce: 'heavy' }, elapsed: 20, splats: 0, state: s, prepGrace: false, gradeBonus: 5 });
   check('grade uplift is tracked in money', graded.gradeUplift > 0);
 
-  // every topping in the roster has a shelf life, tier, and unlock entry ≥ its intro
+  // every topping in the roster has a shelf life and tier; 18 permanent + 4 seasonal
   const allOk = TOPPING_ORDER.every(k => {
     const t = BAL.TOPPINGS[k];
     return t.shelf >= 1 && ['common', 'premium', 'exotic'].includes(t.tier);
   });
-  check('all 18 toppings fully defined', allOk && TOPPING_ORDER.length === 18);
+  const permanent = TOPPING_ORDER.filter(k => !BAL.TOPPINGS[k].seasonal);
+  const seasonal = TOPPING_ORDER.filter(k => BAL.TOPPINGS[k].seasonal);
+  check('all toppings fully defined (18 permanent + 4 seasonal)',
+    allOk && permanent.length === 18 && seasonal.length === 4);
 }
 
 // ---- 8d. specialties, sides, decor buffs -----------------------------------------
@@ -291,8 +294,9 @@ console.log('specialties & sides & decor');
   s.sauces = ['tomato', 'bbq', 'white'];
   s.crusts = ['classic', 'thin', 'stuffed'];
   const avail = Orders.availableRecipes(s);
-  check('all recipes available fully stocked at L30', avail.length === Object.keys(BAL.RECIPES).length,
-    `(${avail.length})`);
+  const permanentRecipes = Object.keys(BAL.RECIPES).filter(id => !BAL.RECIPES[id].seasonal);
+  check('all permanent recipes available fully stocked at L30',
+    permanentRecipes.every(id => avail.includes(id)), `(${avail.length})`);
   // recipe builds only reference real content
   const sane = Object.values(BAL.RECIPES).every(r =>
     r.build.toppings.every(t => BAL.TOPPINGS[t.type])
@@ -392,6 +396,79 @@ console.log('advanced orders');
   const pres = Score.scoreOrder({ pizza: pz2, ticket: pt, elapsed: 20, splats: 0, state: s, prepGrace: false });
   const norm = Score.scoreOrder({ pizza: pz2, ticket: { ...pt, preorder: false }, elapsed: 20, splats: 0, state: s, prepGrace: false });
   check('pre-orders pay the premium', Math.abs(pres.price / norm.price - (1 + BAL.PREORDER.PREMIUM)) < 1e-9);
+}
+
+// ---- 8f. archetypes, events, seasons ---------------------------------------------
+console.log('archetypes & events & seasons');
+{
+  const { seasonOf, seasonActive, syncSeason } = await import('../src/seasons.js');
+  const { rollNextEvent } = await import('../src/events.js');
+
+  // archetypes appear once unlocked, with drain scales
+  const s = newGame();
+  s.level = 30;
+  s.nextDay = null; ensureNextDay(s);
+  const kinds = new Set();
+  for (let i = 0; i < 300; i++) {
+    for (const c of Orders.generateDay(s)) if (c.archetype) kinds.add(c.archetype);
+  }
+  check('all four archetypes appear at L30', ['impatient', 'easygoing', 'tourist', 'vip'].every(k => kinds.has(k)),
+    `(saw ${[...kinds].join(',')})`);
+  const low = newGame();
+  low.nextDay = null; ensureNextDay(low);
+  let anyEarly = false;
+  for (let i = 0; i < 100; i++) {
+    for (const c of Orders.generateDay(low)) if (c.archetype) anyEarly = true;
+  }
+  check('no archetypes before their unlock', !anyEarly);
+
+  // event scheduler: nothing before unlocks; pity forces within the window
+  const e0 = newGame();
+  check('no events before any unlock', rollNextEvent(e0) === null && e0.eventPity.sinceEvent === 0);
+  const e1 = newGame();
+  e1.level = 30;
+  let dry = 0, maxDry = 0, seen = {};
+  for (let d = 0; d < 300; d++) {
+    const ev = rollNextEvent(e1);
+    if (ev) { seen[ev.id] = (seen[ev.id] || 0) + 1; maxDry = Math.max(maxDry, dry); dry = 0; }
+    else dry++;
+  }
+  check('pity timer caps droughts', maxDry <= BAL.EVENTS.PITY_MAX_DRY, `(max dry ${maxDry})`);
+  check('all event types roll', Object.keys(BAL.EVENTS.DEFS).every(id => seen[id] > 0),
+    `(${Object.keys(seen).length}/8)`);
+  const shortages = [];
+  for (let i = 0; i < 200; i++) {
+    const ev = rollNextEvent(e1);
+    if (ev && ev.id === 'shortage') shortages.push(ev.target);
+  }
+  check('shortages pick a real target', shortages.length > 0 && shortages.every(t =>
+    BAL.TOPPINGS[t] || BAL.BASICS[t]));
+  // shortage triples tonight's restock price
+  const sc = newGame();
+  const base = unitCost(sc, 'pepperoni');
+  sc.nextDay = { day: 1, event: { id: 'shortage', target: 'pepperoni' } };
+  check('shortage triples the unit cost', Math.abs(unitCost(sc, 'pepperoni') / base - 3) < 1e-9);
+
+  // seasons: 36-day loop, rotators swap at the boundary
+  check('season cycle loops', seasonOf(1) === 'spring' && seasonOf(10) === 'summer'
+    && seasonOf(19) === 'spooky' && seasonOf(28) === 'winter' && seasonOf(37) === 'spring');
+  const w = newGame();
+  w.level = 30;
+  w.day = 10;                                   // summer
+  const ch = syncSeason(w);
+  check('season lends its topping', ch && ch.entered === 'summer'
+    && w.toppings.includes('cherrytomato') && w.stock.cherrytomato === BAL.SEASONS.LENT_STOCK);
+  w.day = 19;                                   // spooky
+  const ch2 = syncSeason(w);
+  check('rotators swap at the boundary', ch2.entered === 'spooky'
+    && !w.toppings.includes('cherrytomato') && w.toppings.includes('pumpkin'));
+  check('seasons dark before unlock', seasonActive(newGame()) === null);
+  // seasonal recipe only in season
+  w.toppings.push('onion');
+  w.sauces.push('bbq');
+  const avail = Orders.availableRecipes(w);
+  check('seasonal recipe available in season', avail.includes('jackolantern'));
+  check('other seasons’ recipes hidden', !avail.includes('estiva') && !avail.includes('margheritafresca'));
 }
 
 // ---- 9. XP / level spine ------------------------------------------------------

@@ -135,8 +135,9 @@ export const Score = {
 
   // The whole order → money + satisfaction. `splats` = sauce counter splats,
   // `gradeBonus` = satisfaction points from supplier grades consumed,
-  // `satAdjust` = other satisfaction shifts (sides, event moods).
-  scoreOrder({ pizza, ticket, elapsed, splats, state, prepGrace, gradeBonus = 0, satAdjust = 0 }) {
+  // `satAdjust` = other satisfaction shifts (sides, event moods),
+  // `eventMult` = day-event price multiplier (rush/festival payouts).
+  scoreOrder({ pizza, ticket, elapsed, splats, state, prepGrace, gradeBonus = 0, satAdjust = 0, eventMult = 1 }) {
     const S = BAL.SCORE, W = S.WEIGHTS, E = BAL.ECONOMY;
 
     const sizeFrac = pizza.size === ticket.size ? 1 : 0;
@@ -196,6 +197,7 @@ export const Score = {
     }
     // phone pre-orders pay ahead for the privilege
     if (ticket.preorder) price *= 1 + BAL.PREORDER.PREMIUM;
+    price *= eventMult;
 
     const tips = tipMult(state);
     const moneyFor = sat => {
@@ -267,6 +269,7 @@ export const Serve = {
       splats: svc.splatCount, state: svc.state, prepGrace,
       gradeBonus: Score.gradeSatBonus(svc.orderGrades),
       satAdjust: sideSat + lateSat,
+      eventMult: svc.eventPay || 1,
     });
     res.sidePay = sidePay;
     res.sideKey = ticket.side || null;
@@ -367,6 +370,67 @@ export const Serve = {
       res.tip += res.price * R.TIP_BONUS_FRAC;
     }
 
+    // archetype economics: VIPs and tourists pay their way
+    const arch = cust.archetype ? BAL.ARCHETYPES[cust.archetype] : null;
+    if (arch) {
+      if (arch.payMult) res.pay *= arch.payMult;
+      if (arch.tipMult) res.tip *= arch.tipMult;
+    }
+
+    // ---- marked visitors settle their verdicts here -----------------------
+    if (cust.role === 'critic') {
+      const D = BAL.EVENTS.DEFS.critic;
+      if (res.satisfaction >= D.graceSat) {
+        state.money += D.reward;
+        svc.bonusEarned += D.reward;
+        state.criticBoost = D.footfallBoost;
+        pushRating(state, 5); pushRating(state, 5);
+        svc.eventReport = `The critic filed a rave review (+${gbp(D.reward)}, word spreads for tomorrow).`;
+        Juice.stamp(640, 250, 'RAVE REVIEW!', { color: '#9fe07c', size: 48 });
+        Juice.confetti(640, 240, 26);
+        Sfx.fanfare();
+        svc.onXP(BAL.XP.CRITIC_A, cust.x, cust.y - 30);
+      } else if (res.satisfaction < D.failSat) {
+        pushRating(state, 1); pushRating(state, 1);
+        svc.eventReport = 'The critic’s write-up was… vivid. The stars felt it.';
+        Juice.stamp(640, 250, 'SCATHING REVIEW…', { color: '#ff8a70', size: 40 });
+        Sfx.grumpy();
+      } else {
+        svc.eventReport = 'The critic left a measured, forgettable column.';
+      }
+    } else if (cust.role === 'nonna') {
+      const D = BAL.EVENTS.DEFS.nonna;
+      if (res.satisfaction >= D.graceSat) {
+        res.tip *= D.tipMult;
+        svc.eventReport = 'Nonna kissed her fingers at the doorway. The tip was absurd.';
+        Juice.stamp(640, 250, 'NONNA APPROVES!', { color: '#f5b942', size: 46 });
+        Juice.sparkle(cust.x, cust.y - 40, 12);
+        Sfx.fanfare();
+        svc.onXP(BAL.XP.EVENT, cust.x, cust.y - 30);
+      } else {
+        svc.eventReport = 'Nonna patted your cheek: “next time, more love.” No harm done.';
+      }
+    } else if (cust.role === 'inspector') {
+      const D = BAL.EVENTS.DEFS.inspector;
+      const mess = svc.splats.length;
+      const outs = Object.keys(svc.outWarned).length;
+      if (mess <= D.maxSplats && outs === 0) {
+        state.money += D.reward;
+        svc.bonusEarned += D.reward;
+        svc.eventReport = `Inspection passed — clean counter, full bins (+${gbp(D.reward)}).`;
+        Juice.stamp(640, 250, 'INSPECTION PASSED!', { color: '#9fe07c', size: 42 });
+        Sfx.goalDing();
+        svc.onXP(BAL.XP.EVENT, cust.x, cust.y - 30);
+      } else {
+        pushRating(state, 2);
+        svc.eventReport = mess > D.maxSplats
+          ? 'Inspection flagged the sauce-splattered counter. Points docked.'
+          : 'Inspection flagged empty bins mid-service. Points docked.';
+        Juice.stamp(640, 250, 'CITATION ISSUED', { color: '#ff8a70', size: 40 });
+        Sfx.grumpy();
+      }
+    }
+
     // sides ring up alongside the pizza
     if (res.sidePay > 0) {
       svc.sideRevenue = svc.sideRevenue || {};
@@ -392,6 +456,10 @@ export const Serve = {
     }
     pushRating(state, res.stars);
     if (cust.regular) pushRating(state, res.stars);
+    // a VIP's word carries — their rating lands twice more
+    if (arch && arch.ratingWeight) {
+      for (let i = 1; i < arch.ratingWeight; i++) pushRating(state, res.stars);
+    }
     svc.served++;
     svc.sales += res.pay;
     svc.tipsTotal += res.tip;

@@ -60,6 +60,7 @@ export const DayEndScene = {
       emergency: Math.round((stats.emergency || 0) * 100) / 100,
       preorders: stats.preordersTaken || 0, preordersLate: stats.preordersLate || 0,
       sidesSold: stats.sidesSold || 0,
+      event: stats.event || null,
     });
 
     state.day += 1;
@@ -134,9 +135,11 @@ export const DayEndScene = {
     ui.total = total;
     ui.pendingLevel = pendingLevel;
 
+    const evDef = stats.event ? BAL.EVENTS.DEFS[stats.event] : null;
     el.innerHTML = `
       <div class="receipt">
         <div class="rc-head">— SLICE OF LIFE —<br><span>Day ${stats.day} takings</span></div>
+        ${evDef && stats.eventReport ? `<div class="rc-event">${evDef.icon} ${stats.eventReport}</div>` : ''}
         <div class="rc-lines"></div>
         <div class="rc-total hidden"><span>TOTAL</span><b id="rc-total-num">£0.00</b></div>
         <div class="rc-stars hidden">

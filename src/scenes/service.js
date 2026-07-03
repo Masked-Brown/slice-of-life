@@ -7,9 +7,10 @@
 import { BAL, ING } from '../balance.js';
 import { clamp, lerp, rand, Juice, Ease, rr } from '../juice.js';
 import { Sfx } from '../audio.js';
-import { currentRating, pushRating, saveGame, gbp, refundStock } from '../state.js';
+import { currentRating, pushRating, saveGame, gbp, refundStock, addStock } from '../state.js';
 import { ensureNextDay, checkMilestones, goalProgress } from '../goals.js';
 import { awardXP, celebrateLevelUp, xpFrac } from '../progress.js';
+import { syncSeason, seasonActive, seasonDaysLeft } from '../seasons.js';
 import { Telemetry } from '../telemetry.js';
 import { Orders } from '../stations/order.js';
 import { Build, PIZZA_POS, TRAY, NEXT_BTN, BINS_Y } from '../stations/build.js';
@@ -50,7 +51,25 @@ export const ServiceScene = {
 
   enter(g) {
     const state = g.state;
-    const plan = ensureNextDay(state);        // today's specials + daily goal
+    const seasonChange = syncSeason(state);   // the calendar may have turned
+    const plan = ensureNextDay(state);        // today's specials + daily goal + event
+
+    // a surprise delivery lands before the shutters go up (once per day)
+    if (plan.event && plan.event.id === 'delivery' && !plan.deliveryDone) {
+      plan.deliveryDone = true;
+      plan.deliveryGifts = [];
+      const D = BAL.EVENTS.DEFS.delivery;
+      const pool = state.toppings.slice();
+      for (let i = 0; i < D.kinds && pool.length; i++) {
+        const t = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+        const n = D.unitsMin + Math.floor(Math.random() * (D.unitsMax - D.unitsMin + 1));
+        addStock(state, t, n);
+        plan.deliveryGifts.push({ t, n });
+      }
+      saveGame(state);
+    }
+
+    const evDef = plan.event ? BAL.EVENTS.DEFS[plan.event.id] : null;
     svc = {
       game: g, state,
       elapsed: 0,
@@ -95,6 +114,11 @@ export const ServiceScene = {
     };
     svc.groupParked = [];
     svc.preorders = [];
+    svc.event = plan.event || null;
+    svc.eventDrain = evDef && evDef.patienceMult ? 1 / evDef.patienceMult : 1;
+    svc.eventPay = (evDef && evDef.payMult) || 1;
+    svc.eventReport = null;
+    svc.seasonChange = seasonChange;
     svc.totalCustomers = 0;
     g._svc = svc;   // debug/testing handle
 
@@ -161,9 +185,39 @@ export const ServiceScene = {
         </div>`;
     }).join('');
 
+    // season banner (once the calendar has unlocked)
+    const season = seasonActive(state);
+    const sDef = season ? BAL.SEASONS.LIST[season] : null;
+    const daysLeft = season ? seasonDaysLeft(state) : 0;
+    const change = svc.seasonChange;
+    const seasonRow = sDef ? `
+      <div class="db-season" style="border-color:${sDef.accent}">
+        ${sDef.icon} <b>${sDef.label}</b>
+        ${change && change.entered === season
+          ? `<span class="db-note"> — new season! ${sDef.toppings.map(t => BAL.TOPPINGS[t].label).join(' & ')} in the bins, ${BAL.RECIPES[sDef.recipe].name} on the menu</span>`
+          : `<span class="db-note"> · ${daysLeft} day${daysLeft > 1 ? 's' : ''} left${daysLeft <= 2 ? ' — last chance this year!' : ''}</span>`}
+      </div>` : '';
+
+    // event announcement — the board never surprises you
+    const ev = plan.event;
+    const evDef = ev ? BAL.EVENTS.DEFS[ev.id] : null;
+    const evRow = evDef ? `
+      <div class="db-section">
+        <div class="db-label">TODAY'S EVENT</div>
+        <div class="db-event">${evDef.icon} <b>${evDef.label}</b> — ${
+          ev.id === 'shortage'
+            ? `the market ran dry on <b>${ING(ev.target).label}</b>: tonight's restock costs ×${evDef.priceMult}.`
+            : ev.id === 'delivery' && plan.deliveryGifts
+              ? `free stock arrived: ${plan.deliveryGifts.map(gft => `${ING(gft.t).label} ×${gft.n}`).join(', ')}. Use it before it turns!`
+              : evDef.blurb}
+        </div>
+      </div>` : '';
+
     el.innerHTML = `
       <div class="dayboard">
         <div class="db-head">— DAY ${state.day} —</div>
+        ${seasonRow}
+        ${evRow}
         <div class="db-section">
           <div class="db-label">TODAY'S SPECIAL${plan.specials.length > 1 ? 'S' : ''}</div>
           ${specialRows}
@@ -458,6 +512,20 @@ export const ServiceScene = {
         && (svc.served + svc.lost) >= svc.totalCustomers && svc.totalCustomers > 0) {
       svc.dayEndQueued = true;
       this._checkGoal();           // all-day goals (no walk-outs, 90% sat) settle now
+      // events without a mid-day verdict get their report written here
+      if (svc.event && !svc.eventReport) {
+        const reports = {
+          rush: `Rush hour survived — ${svc.served} served at surge prices.`,
+          festival: `Festival day! ${svc.served} fed, ${svc.sidesSold || 0} sides gone.`,
+          slow: 'A slow, deep morning — big orders, easy tempers.',
+          shortage: 'You cooked through the shortage.',
+          delivery: 'The surprise delivery got put to work.',
+          critic: 'The critic never made it to a table.',
+          nonna: 'Nonna watched from the doorway but the queue swallowed her visit.',
+          inspector: 'The inspector left without filing — lucky.',
+        };
+        svc.eventReport = reports[svc.event.id] || null;
+      }
       const stats = {
         day: svc.state.day,
         served: svc.served, lost: svc.lost,
@@ -475,6 +543,8 @@ export const ServiceScene = {
         preordersTaken: svc.preorders.length,
         preordersDone: svc.preordersDone || 0,
         preordersLate: svc.preordersLate || 0,
+        event: svc.event ? svc.event.id : null,
+        eventReport: svc.eventReport,
         xpToday: svc.xpToday,
         goalHit: !!svc.goal.hit,
         goalDesc: svc.goal.desc, goalReward: svc.goal.reward,
@@ -868,6 +938,35 @@ export const ServiceScene = {
       ctx.fillRect(0, 0, W, 152);
       ctx.restore();
     }
+    // seasonal dressing: a bunting garland in the season's colour; festival
+    // days double up with party flags
+    const season = seasonActive(svc.state);
+    const festival = svc.event && svc.event.id === 'festival';
+    if (season || festival) {
+      const accent = festival ? '#e2725b' : BAL.SEASONS.LIST[season].accent;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(74,46,29,0.45)';
+      ctx.lineWidth = 2;
+      for (let seg = 0; seg < 4; seg++) {
+        const x0 = 40 + seg * 310, x1 = x0 + 300;
+        ctx.beginPath();
+        ctx.moveTo(x0, 4);
+        ctx.quadraticCurveTo((x0 + x1) / 2, 26, x1, 4);
+        ctx.stroke();
+        for (let i = 1; i < 8; i++) {
+          const k = i / 8;
+          const fx = lerp(x0, x1, k);
+          const fy = 4 + 2 * 22 * k * (1 - k) + 3;
+          ctx.fillStyle = festival && i % 2 ? '#f5b942' : accent;
+          ctx.beginPath();
+          ctx.moveTo(fx - 6, fy); ctx.lineTo(fx + 6, fy); ctx.lineTo(fx, fy + 11);
+          ctx.closePath(); ctx.fill();
+        }
+      }
+      ctx.restore();
+      ctx.lineWidth = 4; ctx.strokeStyle = OUTLINE;
+    }
+
     // tier 6: the landmark — a little chandelier and a brass plaque
     if (tier >= 6) {
       ctx.save();

@@ -47,6 +47,15 @@ export const ShopScene = {
           </div>
         </div>
         <div class="shop-banner">📌 Tomorrow's special: ${specialTxt} — expect extra demand, stock up!</div>
+        ${(() => {
+          const ev = g.state.nextDay.event;
+          if (!ev) return '';
+          const d = BAL.EVENTS.DEFS[ev.id];
+          const extra = ev.id === 'shortage'
+            ? ` <b>${ING(ev.target).label}</b> restocks at ×${d.priceMult} tonight — buy around it or eat the cost.`
+            : '';
+          return `<div class="shop-banner shop-banner-event">${d.icon} Tomorrow: <b>${d.label}</b>.${extra}</div>`;
+        })()}
         <div class="shop-tabs">
           <button class="shop-tab" data-tab="equipment">Equipment</button>
           <button class="shop-tab" data-tab="menu">Menu</button>
