@@ -143,3 +143,43 @@ export function xpFrac(state) {
   const { into, need } = xpProgress(state);
   return need === Infinity ? 1 : Math.max(0, Math.min(1, into / need));
 }
+
+// ---- Loyalty Cards ----------------------------------------------------------
+export function loyaltyStamps(state, key) {
+  return (state.loyalty[key] && state.loyalty[key].stamps) | 0;
+}
+
+export function loyaltyTier(state, key) {
+  const stamps = loyaltyStamps(state, key);
+  let tier = 0;
+  for (const need of BAL.LOYALTY.TIERS) if (stamps >= need) tier++;
+  return tier;
+}
+
+// a stamp lands; returns the new tier if this stamp crossed a threshold
+export function recordLoyalty(state, key) {
+  if (!unlocked(state, 'system', 'loyalty')) return null;
+  const before = loyaltyTier(state, key);
+  const slot = state.loyalty[key] || (state.loyalty[key] = { stamps: 0 });
+  slot.stamps++;
+  const after = loyaltyTier(state, key);
+  return after > before ? after : null;
+}
+
+// ---- Recipe Mastery ------------------------------------------------------------
+export function masteryStars(state, recipeId) {
+  const perfects = (state.mastery[recipeId] && state.mastery[recipeId].perfects) | 0;
+  let stars = 0;
+  for (const need of BAL.MASTERY.STARS_AT) if (perfects >= need) stars++;
+  return stars;
+}
+
+// a perfect specialty lands; returns the new star count on a star-up
+export function recordMastery(state, recipeId) {
+  if (!unlocked(state, 'system', 'mastery')) return null;
+  const before = masteryStars(state, recipeId);
+  const slot = state.mastery[recipeId] || (state.mastery[recipeId] = { perfects: 0 });
+  slot.perfects++;
+  const after = masteryStars(state, recipeId);
+  return after > before ? after : null;
+}

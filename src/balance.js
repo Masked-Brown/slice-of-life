@@ -296,6 +296,26 @@ export const BAL = {
     PATIENCE_MULT: 1.9,          // their patience pool scales to the workload
   },
 
+  // ---- Loyalty Cards (original system #1) --------------------------------------
+  // Every regular carries a stamp card: each 85+ serve of their signature
+  // order adds a stamp. Tiers make them visit more, tip better, and at the
+  // top bring a friend. Letting a stamped regular storm out compounds.
+  LOYALTY: {
+    SAT_THRESHOLD: 85,           // a stamp needs this satisfaction
+    TIERS: [3, 6, 10],           // stamps needed for tier 1/2/3
+    VISIT_BONUS: [0, 0.5, 1.0, 1.6],   // pick weight bonus by tier (they come oftener)
+    TIP_BONUS: [0, 0.06, 0.12, 0.20],  // extra tip (fraction of price) by tier
+    FRIEND_CHANCE: 0.35,         // top tier: chance they bring a friend (+1 customer)
+  },
+
+  // ---- Recipe Mastery (original system #2) ---------------------------------------
+  // Perfect a specialty enough times and it earns stars — shown on the menu
+  // and tickets, each star raising that recipe's premium a notch.
+  MASTERY: {
+    STARS_AT: [5, 15],           // perfects needed for ★ / ★★
+    PREMIUM_PER_STAR: 0.06,      // + premium per star
+  },
+
   // ---- Customer archetypes (V3 — the queue reads at a glance) -----------------
   ARCHETYPES: {
     impatient: { chance: 0.13, drain: 1.4 },              // taps a foot, drains fast

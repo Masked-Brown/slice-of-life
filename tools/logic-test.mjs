@@ -493,6 +493,46 @@ console.log('automation');
   check('migration fills dials', m.dials && m.dials.sauce === 'light');
 }
 
+// ---- 8h. loyalty cards & recipe mastery (original systems) ------------------------
+console.log('loyalty & mastery');
+{
+  const { loyaltyTier, recordLoyalty, masteryStars, recordMastery } = await import('../src/progress.js');
+  const s = newGame();
+  check('loyalty inert before its unlock', recordLoyalty(s, 'marco') === null
+    && loyaltyTier(s, 'marco') === 0);
+  s.level = 30;
+  let tierUps = [];
+  for (let i = 0; i < 10; i++) {
+    const up = recordLoyalty(s, 'marco');
+    if (up) tierUps.push(up);
+  }
+  check('tiers land at 3/6/10 stamps', tierUps.join(',') === '1,2,3'
+    && loyaltyTier(s, 'marco') === 3);
+
+  check('mastery inert before its unlock', (() => {
+    const f = newGame(); return recordMastery(f, 'doubledouble') === null;
+  })());
+  let starUps = [];
+  for (let i = 0; i < 15; i++) {
+    const up = recordMastery(s, 'meatfeast');
+    if (up) starUps.push(up);
+  }
+  check('stars land at 5/15 perfects', starUps.join(',') === '1,2'
+    && masteryStars(s, 'meatfeast') === 2);
+
+  // mastery raises the specialty premium in the price
+  s.toppings = [...TOPPING_ORDER];
+  const t = Orders.recipeTicket(s, 'meatfeast');
+  const pz = { size: t.size, R: BAL.PIZZA.RADIUS[t.size], sauceCoverage: 60, sauceType: t.sauceType,
+    crust: t.crust, cheese: new Array(60), toppings: [], bakeZone: t.bake };
+  const starred = Score.scoreOrder({ pizza: pz, ticket: t, elapsed: 20, splats: 0, state: s, prepGrace: false });
+  const fresh = newGame(); fresh.level = 30;
+  const plain = Score.scoreOrder({ pizza: pz, ticket: t, elapsed: 20, splats: 0, state: fresh, prepGrace: false });
+  const wantMult = (1 + BAL.RECIPES.meatfeast.premium + 2 * BAL.MASTERY.PREMIUM_PER_STAR)
+    / (1 + BAL.RECIPES.meatfeast.premium);
+  check('mastery stars raise the premium', Math.abs(starred.price / plain.price - wantMult) < 1e-9);
+}
+
 // ---- 9. XP / level spine ------------------------------------------------------
 console.log('xp & levels');
 {

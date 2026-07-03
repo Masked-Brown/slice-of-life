@@ -10,7 +10,8 @@ import { Juice } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { saveGame, gbp, unitCost, addStock, shelfLife, expiringTomorrow } from '../state.js';
 import { ensureNextDay, checkMilestones, metrics } from '../goals.js';
-import { unlocked, unlockLevel } from '../progress.js';
+import { unlocked, unlockLevel, loyaltyStamps, loyaltyTier, masteryStars } from '../progress.js';
+import { Orders } from '../stations/order.js';
 import { analyticsHTML } from '../analytics.js';
 import { Telemetry } from '../telemetry.js';
 
@@ -261,6 +262,30 @@ export const ShopScene = {
         onBuy: () => this._buy(g, v.cost, () => { s.sauces.push(key); }, `sauce:${key}`),
       }));
     }
+    // specialties on the menu — read-only showcase with mastery stars
+    const avail = Orders.availableRecipes(s);
+    if (avail.length) {
+      const head = document.createElement('div');
+      head.className = 'rs-section-head';
+      head.style.gridColumn = '1 / -1';
+      head.textContent = 'SPECIALTIES ON THE MENU — perfect them to earn stars (and premiums)';
+      grid.appendChild(head);
+      for (const id of avail) {
+        const r = BAL.RECIPES[id];
+        const stars = masteryStars(s, id);
+        const perfects = (s.mastery[id] && s.mastery[id].perfects) | 0;
+        const next = BAL.MASTERY.STARS_AT.find(n => n > perfects);
+        const card = document.createElement('div');
+        card.className = 'shop-card owned';
+        card.innerHTML = `
+          <div class="sc-title">🍕 ${r.name} <span class="sc-stars">${'★'.repeat(stars)}${'☆'.repeat(2 - stars)}</span></div>
+          <div class="sc-desc">${r.build.toppings.map(t => BAL.TOPPINGS[t.type].label).join(', ')}
+            · ${BAL.SAUCES[r.build.sauceType].label} · ${BAL.CRUSTS[r.build.crust].label}<br>
+            Premium +${Math.round((r.premium + stars * BAL.MASTERY.PREMIUM_PER_STAR) * 100)}%
+            ${next ? ` · ${perfects}/${next} perfects to the next star` : ' · fully mastered'}</div>`;
+        grid.appendChild(card);
+      }
+    }
     // crusts
     for (const key of Object.keys(BAL.CRUSTS)) {
       const c = BAL.CRUSTS[key];
@@ -408,7 +433,7 @@ export const ShopScene = {
     grid.appendChild(boostRow);
   },
 
-  // ---- goals: milestone progress + tomorrow's goal -----------------------
+  // ---- goals: milestone progress + tomorrow's goal + loyalty cards --------
   _goalsTab(g, grid) {
     const s = g.state;
     const m = metrics(s);
@@ -419,6 +444,37 @@ export const ShopScene = {
     wrap.innerHTML = `
       <div class="gl-day">Tomorrow's goal: 🎯 <b>${goal.desc}</b>
         <span class="gl-reward">+${gbp(goal.reward)}</span></div>`;
+
+    // loyalty cards — the regulars' stamp wall
+    if (unlocked(s, 'system', 'loyalty')) {
+      const head = document.createElement('div');
+      head.className = 'rs-section-head';
+      head.textContent = 'LOYALTY CARDS — an 85%+ serve of their usual earns a stamp';
+      wrap.appendChild(head);
+      for (const [key, r] of Object.entries(BAL.REGULARS.LIST)) {
+        const stamps = loyaltyStamps(s, key);
+        const tier = loyaltyTier(s, key);
+        const maxNeed = BAL.LOYALTY.TIERS[BAL.LOYALTY.TIERS.length - 1];
+        const dots = Array.from({ length: maxNeed }, (_, i) =>
+          `<span class="lc-dot ${i < stamps ? 'lc-on' : ''} ${BAL.LOYALTY.TIERS.includes(i + 1) ? 'lc-tier' : ''}"></span>`).join('');
+        const perk = tier === 0 ? 'no perks yet'
+          : tier === 1 ? 'visits more, tips +6%'
+          : tier === 2 ? 'visits lots, tips +12%'
+          : 'devoted — tips +20%, brings friends';
+        const row = document.createElement('div');
+        row.className = 'gl-row' + (tier >= 3 ? ' gl-done' : '');
+        row.innerHTML = `
+          <span class="gl-label">${r.name} ${'♥'.repeat(tier)}</span>
+          <span class="lc-dots">${dots}</span>
+          <span class="gl-prog">${stamps} stamp${stamps === 1 ? '' : 's'}</span>
+          <span class="gl-reward">${perk}</span>`;
+        wrap.appendChild(row);
+      }
+      const msHead = document.createElement('div');
+      msHead.className = 'rs-section-head';
+      msHead.textContent = 'MILESTONES';
+      wrap.appendChild(msHead);
+    }
 
     const fmt = (stat, v) =>
       stat === 'earned' || stat === 'bestDayProfit' ? gbp(v)

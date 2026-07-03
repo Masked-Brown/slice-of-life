@@ -7,7 +7,7 @@ import { BAL, TOPPING_ORDER } from '../balance.js';
 import { clamp, lerp, rand, randi, pick, Juice, Ease, rr } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { customersForDay, queueSlots, patienceMult, currentRating } from '../state.js';
-import { unlocked } from '../progress.js';
+import { unlocked, loyaltyTier, loyaltyStamps, masteryStars } from '../progress.js';
 import { seasonActive } from '../seasons.js';
 
 const OUTLINE = '#4a2e1d';
@@ -52,9 +52,19 @@ export const Orders = {
           && r.fav.toppings.every(t => state.toppings.includes(t.type))
           && (r.fav.size !== 'L' || state.sizeL));
         if (eligible.length) {
-          const [key, r] = pick(eligible);
+          // loyalty makes a regular visit more often — weighted pick by tier
+          const weights = eligible.map(([key]) =>
+            1 + BAL.LOYALTY.VISIT_BONUS[loyaltyTier(state, key)]);
+          let roll = Math.random() * weights.reduce((a, b) => a + b, 0);
+          let idx = 0;
+          for (; idx < weights.length - 1; idx++) { roll -= weights[idx]; if (roll <= 0) break; }
+          const [key, r] = eligible[idx];
           usedRegulars.add(key);
           c = this._makeRegular(state, key, r);
+          // top-tier regulars bring a friend now and then
+          if (loyaltyTier(state, key) >= 3 && Math.random() < BAL.LOYALTY.FRIEND_CHANCE) {
+            total += 1;
+          }
         }
       }
       c = c || this._makeCustomer(state, i);
@@ -433,14 +443,26 @@ export const Orders = {
       ? `<span class="tk-chip lv-${t.sauce}"><span class="tk-saucedot" style="background:${BAL.SAUCES[t.sauceType || 'tomato'].color}"></span>${sauceTxt} ${BAL.SAUCES[t.sauceType || 'tomato'].label}</span>`
       : `<span class="tk-chip lv-${t.sauce}">${sauceTxt}</span>`;
     const recipe = t.specialty ? BAL.RECIPES[t.specialty] : null;
+    const stars = t.specialty ? masteryStars(state, t.specialty) : 0;
     const group = c.group;
+    // loyalty card progress rides on the regular's banner
+    let regLine = '';
+    if (c.regular) {
+      const stamps = loyaltyStamps(state, c.regular.key);
+      const tier = loyaltyTier(state, c.regular.key);
+      const next = BAL.LOYALTY.TIERS.find(n => n > stamps);
+      const cardTxt = unlocked(state, 'system', 'loyalty')
+        ? ` · card ${'✚'.repeat(Math.min(stamps, 10))}${next ? ` ${stamps}/${next}` : ' MAX'}`
+        : '';
+      regLine = `<div class="tk-reg">⭐ for ${c.regular.name}${tier > 0 ? ' ' + '♥'.repeat(tier) : ''}${cardTxt}</div>`;
+    }
     el.innerHTML = `
       <div class="tk-pin"></div>
       <div class="tk-head">${group ? `GROUP <span>${group.idx + 1}/${group.tickets.length}</span>` : `ORDER <span>#${svc.orderIndex}</span>`}</div>
-      ${c.regular ? `<div class="tk-reg">⭐ for ${c.regular.name}</div>` : ''}
+      ${regLine}
       ${c.preorder ? `<div class="tk-preorder">📞 pre-order · +${Math.round(BAL.PREORDER.PREMIUM * 100)}%</div>` : ''}
       ${group ? `<div class="tk-group">👨‍👩‍👧 ${group.tickets.length} pizzas · +${Math.round(BAL.GROUP.PREMIUM * 100)}%</div>` : ''}
-      ${recipe ? `<div class="tk-recipe">🍕 ${recipe.name} · +${Math.round(recipe.premium * 100)}%</div>` : ''}
+      ${recipe ? `<div class="tk-recipe">🍕 ${recipe.name}${stars ? ' ' + '★'.repeat(stars) : ''} · +${Math.round((recipe.premium + stars * BAL.MASTERY.PREMIUM_PER_STAR) * 100)}%</div>` : ''}
       ${t.special ? `<div class="tk-special">★ today's special · +${Math.round(BAL.SPECIALS.PRICE_PREMIUM * 100)}%</div>` : ''}
       ${mod ? `<div class="tk-mod">❗ ${mod.label}</div>` : ''}
       <div class="tk-row"><span class="tk-lbl">SIZE</span><span class="tk-chip tk-size">${t.size}</span></div>

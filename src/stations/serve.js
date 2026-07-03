@@ -7,7 +7,7 @@ import { BAL } from '../balance.js';
 import { clamp, lerp, Juice, rand } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { priceMultiplier, pushRating, gbp, tipMult } from '../state.js';
-import { orderXP } from '../progress.js';
+import { orderXP, masteryStars, recordMastery, loyaltyTier, recordLoyalty } from '../progress.js';
 import { Orders } from './order.js';
 
 const BAKE_ORDER = ['raw', 'light', 'normal', 'well', 'burnt'];
@@ -191,9 +191,11 @@ export const Score = {
     let price = (E.BASE_PRICE[ticket.size] + toppingPrice + crustAdd)
       * priceMultiplier(state) * (state.meta ? state.meta.mult : 1);
     if (ticket.special) price *= 1 + BAL.SPECIALS.PRICE_PREMIUM;
-    // specialty recipes charge their own premium
+    // specialty recipes charge their own premium — mastery stars raise it
     if (ticket.specialty && BAL.RECIPES[ticket.specialty]) {
-      price *= 1 + BAL.RECIPES[ticket.specialty].premium;
+      const stars = masteryStars(state, ticket.specialty);
+      price *= 1 + BAL.RECIPES[ticket.specialty].premium
+        + stars * BAL.MASTERY.PREMIUM_PER_STAR;
     }
     // phone pre-orders pay ahead for the privilege
     if (ticket.preorder) price *= 1 + BAL.PREORDER.PREMIUM;
@@ -286,6 +288,18 @@ export const Serve = {
     res.light = light;
     res.ticketServed = ticket;
 
+    // recipe mastery: every perfect specialty (group pizzas included) counts
+    if (ticket.specialty && res.perfect) {
+      const starUp = recordMastery(svc.state, ticket.specialty);
+      if (starUp) {
+        const r = BAL.RECIPES[ticket.specialty];
+        Juice.stamp(640, 210, `${r.name} ${'★'.repeat(starUp)}`, { color: '#f5b942', size: 42 });
+        Juice.floatText(640, 262, `Mastered — +${Math.round(BAL.MASTERY.PREMIUM_PER_STAR * 100)}% on every one from now on`, { color: '#fff6e0', size: 17 });
+        Juice.confetti(640, 230, 20);
+        Sfx.fanfare();
+      }
+    }
+
     // group orders: park this pizza, pin the next ticket, keep cooking
     if (cust.group && cust.group.idx < cust.group.tickets.length - 1) {
       const grp = cust.group;
@@ -374,10 +388,26 @@ export const Serve = {
       }
     }
 
-    // nailing a regular's order earns a fat extra tip; their word counts double
+    // nailing a regular's order earns a fat extra tip; their word counts
+    // double — and stamps their loyalty card (tiers sweeten the tip further)
     const R = BAL.REGULARS;
     if (cust.regular && res.satisfaction >= R.SAT_THRESHOLD) {
-      res.tip += res.price * R.TIP_BONUS_FRAC;
+      const tier = loyaltyTier(state, cust.regular.key);
+      res.tip += res.price * (R.TIP_BONUS_FRAC + BAL.LOYALTY.TIP_BONUS[tier]);
+      if (res.satisfaction >= BAL.LOYALTY.SAT_THRESHOLD) {
+        const tierUp = recordLoyalty(state, cust.regular.key);
+        const stamps = state.loyalty[cust.regular.key] ? state.loyalty[cust.regular.key].stamps : 0;
+        if (tierUp) {
+          Juice.stamp(640, 210, `${cust.regular.name.toUpperCase()} — CARD TIER ${tierUp}!`, { color: '#9fe07c', size: 38 });
+          Juice.floatText(640, 260, tierUp >= 3
+            ? 'Top tier — expect friends in tow'
+            : 'Visits more often, tips better', { color: '#fff6e0', size: 17 });
+          Juice.confetti(cust.x, cust.y - 40, 18);
+          Sfx.fanfare();
+        } else if (stamps > 0) {
+          Juice.floatText(cust.x, cust.y - 140, `loyalty stamp ✚ (${stamps})`, { color: '#9fe07c', size: 16 });
+        }
+      }
     }
 
     // archetype economics: VIPs and tourists pay their way

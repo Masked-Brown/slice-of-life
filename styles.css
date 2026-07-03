@@ -940,6 +940,18 @@ html, body {
 .gl-prog { text-align: right; font-variant-numeric: tabular-nums; color: #8a6f4f; }
 .gl-reward { text-align: right; font-weight: 900; color: #2e7d44; }
 
+/* loyalty cards */
+.lc-dots { display: flex; gap: 4px; align-items: center; }
+.lc-dot {
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+}
+.lc-dot.lc-on { background: var(--green); }
+.lc-dot.lc-tier { border-color: #8a54c9; border-width: 2.5px; }
+.sc-stars { color: var(--gold); font-size: 14px; margin-left: 4px; }
+
 /* ---- day-start board ------------------------------------------------------------ */
 #ui-dayboard {
   display: flex;
