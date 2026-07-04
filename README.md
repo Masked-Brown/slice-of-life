@@ -11,7 +11,7 @@ step, no external assets of any kind — every pixel is drawn and every sound
 
 ## ▶ Play it live
 
-**[PLACEHOLDER — Pages URL goes here]**
+**[masked-brown.github.io/slice-of-life](https://masked-brown.github.io/slice-of-life/)**
 
 ## Run it locally
 
