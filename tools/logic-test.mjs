@@ -69,8 +69,13 @@ console.log('specials');
   };
   const ratio = freq(['olive']) / freq([]);
   check('special topping ~2× piece demand', ratio > 1.5 && ratio < 2.6, `(ratio ${ratio.toFixed(2)})`);
-  const t = Orders.makeTicket(s, ['olive', 'ham']);
-  check('ticket carries special flag', typeof t.special === 'boolean');
+  let flagOk = true;
+  for (let i = 0; i < 500; i++) {
+    const t = Orders.makeTicket(s, ['olive', 'ham']);
+    const has = t.toppings.some(w => w.type === 'olive' || w.type === 'ham');
+    if (t.special !== has) flagOk = false;
+  }
+  check('special flag tracks special toppings exactly', flagOk);
 }
 
 // ---- 4. special premium in scoring ------------------------------------------------

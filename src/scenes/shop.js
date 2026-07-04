@@ -10,7 +10,7 @@ import { Juice } from '../juice.js';
 import { Sfx } from '../audio.js';
 import { saveGame, gbp, unitCost, addStock, shelfLife, expiringTomorrow } from '../state.js';
 import { ensureNextDay, checkMilestones, metrics } from '../goals.js';
-import { unlocked, unlockLevel, loyaltyStamps, loyaltyTier, masteryStars } from '../progress.js';
+import { unlocked, unlockLevel, loyaltyStamps, loyaltyTier, masteryStars, awardXP, celebrateLevelUp } from '../progress.js';
 import { Orders } from '../stations/order.js';
 import { analyticsHTML } from '../analytics.js';
 import { Telemetry } from '../telemetry.js';
@@ -155,6 +155,11 @@ export const ShopScene = {
       setTimeout(() => toast.remove(), 3400);
       Sfx.fanfare();
     });
+    // milestones pay XP everywhere they pay cash — shop included
+    if (hit.length) {
+      const lv = awardXP(g.state, hit.length * BAL.XP.MILESTONE);
+      if (lv.to > lv.from) celebrateLevelUp(g, lv, () => this._renderTab(g));
+    }
   },
 
   _equipmentTab(g, grid) {

@@ -273,14 +273,16 @@ export const Serve = {
       lateSat = -Math.min(BAL.PREORDER.LATE_SAT_MAX, late * BAL.PREORDER.LATE_SAT_PER_SEC);
     }
 
+    const gradesUsed = (light ? po.orderGrades : svc.orderGrades) || {};
     const res = Score.scoreOrder({
       pizza, ticket, elapsed,
       splats: po.splats != null ? po.splats : svc.splatCount,
       state: svc.state, prepGrace,
-      gradeBonus: Score.gradeSatBonus(light ? po.orderGrades : svc.orderGrades),
+      gradeBonus: Score.gradeSatBonus(gradesUsed),
       satAdjust: sideSat + lateSat,
       eventMult: svc.eventPay || 1,
     });
+    res.gradesUsed = gradesUsed;
     res.sidePay = sidePay;
     res.sideKey = ticket.side || null;
     res.sideMade = sidePay > 0;
@@ -336,6 +338,7 @@ export const Serve = {
       res.tip = all.reduce((a, r) => a + r.tip, 0) * prem;
       res.satisfaction = Math.round(all.reduce((a, r) => a + r.satisfaction, 0) / all.length);
       res.perfect = all.every(r => r.perfect);
+      res.perfectCount = all.filter(r => r.perfect).length;  // each pizza counts
       res.accuracy = Math.round(all.reduce((a, r) => a + r.accuracy, 0) / all.length);
       let stars = 1;
       for (const [min, st] of BAL.SCORE.STAR_THRESHOLDS) if (res.satisfaction >= min) { stars = st; break; }
@@ -383,13 +386,15 @@ export const Serve = {
           + typePrice * priceMultiplier(state) * satMult;
       }
     }
-    // grade bookkeeping for the "is premium worth it?" analytics line
+    // grade bookkeeping for the "is premium worth it?" analytics line —
+    // always the grades this order actually consumed (dual-oven serves
+    // carry theirs in the pass snapshot, not the in-progress build's)
     svc.gradeUplift = (svc.gradeUplift || 0) + (res.gradeUplift || 0);
-    if (svc.orderGrades) {
+    if (res.gradesUsed) {
       svc.gradeUnits = svc.gradeUnits || {};
-      for (const key in svc.orderGrades) {
+      for (const key in res.gradesUsed) {
         const slot = svc.gradeUnits[key] || (svc.gradeUnits[key] = {});
-        for (const g in svc.orderGrades[key]) slot[g] = (slot[g] || 0) + svc.orderGrades[key][g];
+        for (const g in res.gradesUsed[key]) slot[g] = (slot[g] || 0) + res.gradesUsed[key][g];
       }
     }
 
@@ -494,9 +499,12 @@ export const Serve = {
     state.stats.lifetimeEarned += total;
     state.lifetime.served += pizzas;
     state.lifetime.earned += total;
+    // groups: every perfect pizza on the ticket counts toward the lifetime
+    // tally; the streak stays all-or-nothing (one order, one streak beat)
+    const perfectPizzas = res.perfectCount != null ? res.perfectCount : (res.perfect ? 1 : 0);
+    state.stats.lifetimePerfects += perfectPizzas;
+    state.lifetime.perfects += perfectPizzas;
     if (res.perfect) {
-      state.stats.lifetimePerfects++;
-      state.lifetime.perfects++;
       state.stats.perfectStreak++;
       state.stats.bestPerfectStreak = Math.max(state.stats.bestPerfectStreak, state.stats.perfectStreak);
     } else {

@@ -16,7 +16,8 @@ export function analyticsHTML(state) {
   const waste = d.waste || {};
   const wasteCost = d.wasteCost || 0;
   const emergency = d.emergency || 0;
-  const grossProfit = d.sales + d.tips + d.bonus - d.restockSpend - emergency;
+  const sideRev = Object.values(d.sideRevenue || {}).reduce((a, b) => a + b, 0);
+  const grossProfit = d.sales + d.tips + d.bonus + sideRev - d.restockSpend - emergency;
 
   // per-topping P&L: revenue attributed during service vs cost of units used
   const rows = TOPPING_ORDER
@@ -93,6 +94,7 @@ export function analyticsHTML(state) {
       <div class="an-summary">
         ${stat('Revenue', gbp(d.sales))}
         ${stat('Tips', gbp(d.tips))}
+        ${sideRev > 0.005 ? stat('Sides', gbp(sideRev)) : ''}
         ${stat('Bonuses', gbp(d.bonus))}
         ${stat('Restock spend', '−' + gbp(d.restockSpend), 'an-stat-cost')}
         ${stat('Spoiled', '−' + gbp(wasteCost), wasteCost > 0.005 ? 'an-stat-loss' : '')}

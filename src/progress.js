@@ -5,7 +5,7 @@
 // =====================================================================
 
 import { BAL } from './balance.js';
-import { levelForXP, xpProgress, saveGame, gbp } from './state.js';
+import { levelForXP, xpProgress, gbp } from './state.js';
 import { Juice } from './juice.js';
 import { Sfx } from './audio.js';
 import { Telemetry } from './telemetry.js';
@@ -82,7 +82,9 @@ export function celebrateLevelUp(g, lv, onDone = null) {
     Juice.coinBurst(640, 280, g.hudMoneyPos.x, g.hudMoneyPos.y, 6, () => Sfx.coin());
   }
 
-  // gather every unlock across the levels gained, unseen ones only
+  // gather every unlock across the levels gained, unseen ones only.
+  // No save here: mid-service checkpoints would let a reload replay the
+  // day with its earnings kept — seenUnlocks persists at the day-end save.
   const fresh = [];
   for (let l = lv.from + 1; l <= lv.to; l++) {
     for (const u of unlocksForLevel(l)) {
@@ -93,10 +95,9 @@ export function celebrateLevelUp(g, lv, onDone = null) {
       }
     }
   }
-  saveGame(state);
 
   if (!fresh.length) {
-    if (onDone) Juice.tween({ dur: 1.2, onDone });
+    if (onDone) setTimeout(onDone, 1200);
     return;
   }
 
@@ -115,18 +116,18 @@ export function celebrateLevelUp(g, lv, onDone = null) {
       ${rows}
       <button class="btn btn-big" id="lu-continue">BACK TO THE COUNTER ➜</button>
     </div>`;
-  Juice.tween({
-    dur: 0.9, onDone: () => {
-      el.classList.remove('hidden');
-      Sfx.fanfare();
-      el.querySelector('#lu-continue').addEventListener('click', () => {
-        Sfx.press();
-        el.classList.add('hidden');
-        el.innerHTML = '';
-        if (onDone) onDone();
-      });
-    },
-  });
+  // a real timeout, not a Juice tween: scene exits call Juice.clear() and
+  // must not be able to swallow the reveal
+  setTimeout(() => {
+    el.classList.remove('hidden');
+    Sfx.fanfare();
+    el.querySelector('#lu-continue').addEventListener('click', () => {
+      Sfx.press();
+      el.classList.add('hidden');
+      el.innerHTML = '';
+      if (onDone) onDone();
+    });
+  }, 900);
 }
 
 const TAGS = {

@@ -43,22 +43,27 @@ export const Sides = {
 
   update(svc, dt) {
     const s = svc.side;
-    if (!s) return;
-    if (s.state === 'filling' && s.holding) {
+    if (s && s.state === 'filling' && s.holding) {
       s.fill = clamp(s.fill + BAL.SIDE_RATE * 100 * dt, 0, 112);
       const [lo, hi] = BAL.SIDE_BAND;
       const inBand = s.fill >= lo && s.fill <= hi;
       if (inBand && !s._wasIn) Sfx.bandTick();
       s._wasIn = inBand;
-      if (svc.side.key === 'drinks' && Math.random() < dt * 8) {
+      if (s.key === 'drinks' && Math.random() < dt * 8) {
         Juice.steam(BENCH.x + 214 + (Math.random() * 12 - 6), BENCH.y + 18, 1);
       }
     }
-    if (s.state === 'toasting') {
-      s.toastT += dt;
+    // the toaster keeps running for every in-flight side — including ones
+    // snapshotted into an oven slot or the pass by the second-oven flow
+    const toasting = [s];
+    for (const slot of (svc.ovens || [])) if (slot.side) toasting.push(slot.side);
+    if (svc.passOrder && svc.passOrder.side) toasting.push(svc.passOrder.side);
+    for (const t of toasting) {
+      if (!t || t.state !== 'toasting') continue;
+      t.toastT += dt;
       if (Math.random() < dt * 2.5) Juice.steam(BENCH.x + 70, BENCH.y + 6, 1);
-      if (s.toastT >= BAL.SIDES.garlicbread.toastTime) {
-        s.state = 'ready';
+      if (t.toastT >= BAL.SIDES.garlicbread.toastTime) {
+        t.state = 'ready';
         Sfx.zoneChime();
         Juice.floatText(BENCH.x + BENCH.w / 2, BENCH.y - 22, 'Side ready!', { color: '#9fe07c', size: 17 });
         Juice.sparkle(BENCH.x + 70, BENCH.y + 22, 6);
@@ -183,7 +188,7 @@ export const Sides = {
       ctx.setLineDash([]);
     }
 
-    // label / prompt
+    // label / prompt (kept inside the bench so the bins row below stays clean)
     ctx.fillStyle = '#fff6e0';
     ctx.font = '900 11px Trebuchet MS, system-ui, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -192,7 +197,11 @@ export const Sides = {
       : s.state === 'filling' ? BAL.SIDES[s.key].verb + ' — hold!'
       : s.state === 'toasting' ? 'Toasting…'
       : '✓ ready to serve';
-    ctx.fillText(label, BENCH.x + BENCH.w / 2, BENCH.y + BENCH.h + 12);
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 3;
+    ctx.fillText(label, BENCH.x + BENCH.w / 2, BENCH.y + BENCH.h - 7);
+    ctx.restore();
 
     // wanted glow
     if (want && (!s || s.state !== 'ready')) {

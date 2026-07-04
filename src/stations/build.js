@@ -151,6 +151,7 @@ export const Build = {
     const sx = ball.x, sy = ball.y, ex = PIZZA_POS.x, ey = PIZZA_POS.y;
     const apex = -120;
     Juice.tween({
+      target: pz,                 // killable: an abort's killTweensOf(pz) must stop the arc
       dur: 0.38, ease: Ease.linear,
       onUpdate: (e, t) => {
         pz.x = lerp(sx, ex, t);
@@ -159,6 +160,8 @@ export const Build = {
         pz.rot = t * 2.2;
       },
       onDone: () => {
+        // the customer may have stormed out mid-arc
+        if (svc.pizza !== pz || !svc.ticket) return;
         pz.rot = 0;
         Sfx.doughSlap();
         Juice.flourPuff(ex, ey + 20, 14);
@@ -546,10 +549,12 @@ export const Build = {
       const h = svc.held;
       svc.held = null;
       // a piece that misses the pizza goes back in its bin
-      if (!this._placePiece(svc, h.type, x, y)) refundStock(svc.state, h.type);
+      const placedFirst = this._placePiece(svc, h.type, x, y);
+      if (!placedFirst) refundStock(svc.state, h.type);
       if (h.n === 2) {
-        // second piece lands beside the first on a free grid point
-        const spot = this._freeGhost(svc, x, y, true);
+        // second piece lands beside the first on a free grid point —
+        // unless the whole drop missed, in which case both go home
+        const spot = placedFirst ? this._freeGhost(svc, x, y, true) : null;
         if (spot) this._placePiece(svc, h.type, pz.x + spot.x, pz.y + spot.y, 0.08);
         else refundStock(svc.state, h.type);
       }

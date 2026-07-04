@@ -62,6 +62,9 @@ const game = {
 
   setScene(name, params) {
     if (this.scene) this.scene.exit(this);
+    // the audio popover floats above every scene — close it on transitions
+    const au = document.getElementById('ui-audio');
+    if (au) au.classList.add('hidden');
     this.sceneName = name;
     this.scene = scenes[name];
     this.scene.enter(this, params);

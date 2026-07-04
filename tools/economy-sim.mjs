@@ -501,7 +501,9 @@ function playDay(state, telemetry) {
   const restockSpend = state.carriedRestockSpend;
   state.carriedRestockSpend = 0;
   day.restockSpend = restockSpend;
-  day.profit = day.sales + day.tips + day.sideRev + day.bonus - restockSpend - day.emergency - day.wasteCost;
+  // waste is NOT a second cash outflow (the cash left at restock time) —
+  // matches the game's dayEnd accounting
+  day.profit = day.sales + day.tips + day.sideRev + day.bonus - restockSpend - day.emergency;
   state.stats.bestDayProfit = Math.max(state.stats.bestDayProfit, day.profit);
   state.lifetime.days++;
   state.day += 1;

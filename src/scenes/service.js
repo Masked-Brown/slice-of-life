@@ -70,6 +70,20 @@ export const ServiceScene = {
       saveGame(state);
     }
 
+    // the season may have turned overnight — scrub the plan of any rotator
+    // that just left the menu (specials, accepted pre-order tickets)
+    if (seasonChange && plan) {
+      plan.specials = plan.specials.filter(t => state.toppings.includes(t));
+      if (!plan.specials.length && state.toppings.length) {
+        plan.specials.push(state.toppings[Math.floor(Math.random() * state.toppings.length)]);
+      }
+      if (plan.preorders) {
+        plan.preorders = plan.preorders.filter(o =>
+          o.ticket.toppings.every(w => state.toppings.includes(w.type)));
+      }
+      saveGame(state);
+    }
+
     const evDef = plan.event ? BAL.EVENTS.DEFS[plan.event.id] : null;
     svc = {
       game: g, state,
@@ -311,12 +325,15 @@ export const ServiceScene = {
     Sfx.tick();
   },
 
-  // accepted pre-orders walk in (front of the line) once their due point passes
+  // accepted pre-orders walk in (front of the line) once their due point
+  // passes — or as the last arrivals when the day runs short of customers
+  // (a slow morning must never leave a booked pickup, and the day, hanging)
   _checkPreorders() {
     if (!svc.preorders.length || !svc.dayStarted) return;
     const doneCount = svc.served + svc.lost;
+    const queueDry = svc.pending.length === 0;
     for (const o of svc.preorders) {
-      if (o.injected || doneCount < o.dueAfter) continue;
+      if (o.injected || (doneCount < o.dueAfter && !queueDry)) continue;
       o.injected = true;
       const c = Orders.makePreorderCustomer(svc.state, o);
       svc.pending.unshift(c);
@@ -327,6 +344,7 @@ export const ServiceScene = {
   },
 
   _onDoughDown(size) {
+    if (!svc || !svc.ticket) return;
     const grade = size === svc.ticket.size ? 'perfect' : 'off';
     this._gradePop(grade, PIZZA_POS.x, PIZZA_POS.y - svc.pizza.R - 24);
     svc.stage = 'sauce';
@@ -366,8 +384,11 @@ export const ServiceScene = {
         this._gradePop(grade, PASS.x, PASS.y - 70);
       }
     }
-    // single oven: classic lockstep. Dual: only a mid-group bake pauses us.
-    if (!dual || svc.stage === 'baking') svc.stage = 'serve';
+    // single oven: classic lockstep. Dual: only the FRONT order's own bake
+    // (a mid-group pizza) unlocks the serve stage — pulling another slot's
+    // pizza during a group bake must not flip the stage early.
+    const pulledOwn = po && po.ticket === svc.ticket;
+    if (!dual || (svc.stage === 'baking' && pulledOwn)) svc.stage = 'serve';
   },
 
   // dual oven: the order steps into the oven and its customer steps aside —
@@ -392,7 +413,10 @@ export const ServiceScene = {
       if (t && t.size === 'L') svc.largeSold++;
       if (res.perfect) svc.perfectsToday++;
       if (res.elapsed <= res.par) svc.underPar++;
-      for (const k in svc.usage) if (svc.usage[k] > 0) svc.usedTypes.add(k);
+      // 'useAll' counts toppings only — usage also carries basics & side stock
+      for (const k in svc.usage) {
+        if (svc.usage[k] > 0 && BAL.TOPPINGS[k]) svc.usedTypes.add(k);
+      }
       this._checkGoal();
       this._checkMilestones();
     }

@@ -215,10 +215,12 @@ export const Orders = {
     }
   },
 
-  // a regular: fixed look, fixed signature order
+  // a regular: fixed look, fixed signature order — no hidden archetype
   _makeRegular(state, key, r) {
     const c = this._makeCustomer(state, 0);
     c.regular = { key, name: r.name };
+    c.archetype = null;
+    c.drainScale = 1;
     c.colors = { skin: r.skin, shirt: r.shirt, hair: r.hair, hat: r.hat };
     c.ticket = {
       size: r.fav.size, sauce: r.fav.sauce, cheese: r.fav.cheese, bake: r.fav.bake,
@@ -235,6 +237,7 @@ export const Orders = {
     const c = this._makeCustomer(state, 0);
     c.ticket = offer.ticket;
     c.preorder = offer;
+    c.archetype = null;               // the phone order IS their persona
     c.drainScale = 1 / BAL.PREORDER.PATIENCE_SCALE;
     c.colors.hat = true;
     return c;

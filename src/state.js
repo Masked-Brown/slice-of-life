@@ -128,6 +128,11 @@ export function migrate(s) {
   }
   // never lock content the player already owns (V2 saves; belt & braces on V3)
   out.level = Math.max(out.level, minLevelForOwned(out));
+  // a clamped level must come with that level's XP floor, or the XP bar
+  // sits at 0% through a long dead zone before the next level-up
+  let xpFloor = 0;
+  for (let i = 0; i < out.level - 1 && i < BAL.XP.CURVE.length; i++) xpFloor += BAL.XP.CURVE[i];
+  out.xp = Math.max(out.xp | 0, xpFloor);
   out.lifetime.maxLevel = Math.max(out.lifetime.maxLevel, out.level);
   // every stock entry gets batches; missing batch info = one fresh batch
   for (const key of Object.keys(out.stock)) {
