@@ -9,7 +9,11 @@ Vanilla HTML/CSS/JS (ES modules), Canvas + Web Audio. No frameworks, no build
 step, no external assets of any kind — every pixel is drawn and every sound
 (including the generative background music) is synthesized in code.
 
-## Run it
+## ▶ Play it live
+
+**[PLACEHOLDER — Pages URL goes here]**
+
+## Run it locally
 
 Any static file server works. From this folder:
 
@@ -132,3 +136,8 @@ node tools/smoke-test.mjs     # 4 browser scenarios, 67 checks
 
 All balance lives in `src/balance.js` with comments. No magic numbers in
 gameplay code.
+
+---
+
+© 2026 Masked-Brown. Source visible for portfolio/demo purposes; all rights
+reserved.
