@@ -1,17 +1,55 @@
 # 🍕 Slice of Life
 
-A first-person pizza shop game. You are the chef: read the ticket, build the
-pizza by hand, bake it, ring the bell. Earn money **and Chef XP**, climb the
-star rating, manage stock that spoils, ride the events calendar, upgrade the
-shop until the late game turns you from executor into orchestrator.
+*One chef. One shop. One perfect loop.*
 
-Vanilla HTML/CSS/JS (ES modules), Canvas + Web Audio. No frameworks, no build
-step, no external assets of any kind — every pixel is drawn and every sound
-(including the generative background music) is synthesized in code.
+## ▶ [**PLAY NOW**](https://masked-brown.github.io/slice-of-life/)
 
-## ▶ Play it live
+![Slice of Life — title screen](screenshots/title.png)
 
-**[masked-brown.github.io/slice-of-life](https://masked-brown.github.io/slice-of-life/)**
+## What is this
+
+A first-person pizza shop game, built solo, no dependencies. You're the chef:
+read the ticket, build the pizza by hand, bake it, ring the bell. Every order
+pays cash *and* Chef XP — leveling up is what unlocks new toppings, recipes,
+equipment and events, one idea at a time. Run the shop long enough and you
+stop being the one making every pizza and start being the one running the
+place: automation, loyal regulars, a menu of specialties, and a business that
+has to survive its own supply chain.
+
+## Features
+
+- **Hand-built pizza stations** — dough, hold-to-pour sauce & cheese with
+  live band gauges, drag-on toppings, oven bake zones, a sides bench for
+  garlic bread and drinks
+- **Chef XP & leveling** — 30 levels on a declarative unlock table; every
+  topping, recipe, upgrade and event opens through play, not a paywall
+- **Stock & spoilage economy** — every ingredient is bought by the unit and
+  ages; supplier grades (budget/standard/premium) trade delight against
+  shelf life, and the analytics tab shows exactly what waste is costing you
+- **Specialty pizzas & recipe mastery** — named recipes that earn stars (and
+  a bigger price tag) the more perfectly you repeat them
+- **Loyalty cards** — regulars you nail orders for stamp a card, climb
+  tiers, tip better, and eventually bring friends
+- **Automation arc** — proofer, auto-dispenser, cheese hopper, a second
+  oven and a ticket rail turn the late game from executor into orchestrator
+- **Events & a 36-day seasonal calendar** — rush hours, food critics,
+  supply shortages, festivals, health inspections, rotating seasonal
+  toppings — always announced a day ahead, never a surprise
+- **Milestones & daily goals** — lifetime milestones plus a rotating daily
+  goal with its own payout
+- **Generative, mood-aware audio** — the soundtrack reads the room (rush
+  days run faster, critic days run tenser); every sound, including the
+  music, is synthesized in code — zero audio files
+- **Zero dependencies** — vanilla JS/HTML/CSS, Canvas + Web Audio, no
+  frameworks, no build step, no external assets of any kind
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Mid-build, colourful topping spread](screenshots/build.png) *Build stations — hold-to-pour sauce & cheese, drag-on toppings* | ![Pizza baking in the oven](screenshots/oven.png) *The oven — bake zones, pull it at the right moment* |
+| ![Day-end receipt with stars](screenshots/dayend.png) *Day-end receipt — the tally, then the stars* | ![Upgrade shop equipment tab](screenshots/shop.png) *The shop — equipment, menu, restock, analytics, goals* |
+| ![Chef level-up reveal card](screenshots/moment.png) *A level-up reveal — new unlocks, one idea at a time* | |
 
 ## Run it locally
 
@@ -25,6 +63,11 @@ Then open **http://localhost:8000** in a desktop browser (Chrome/Firefox/Edge).
 Mouse-first; pointer events mean touch mostly works too.
 
 > ES modules don't load from `file://` — you do need the local server.
+
+## Tech stack
+
+Vanilla JS/HTML/CSS (ES modules), Canvas + Web Audio — no frameworks, no
+build step, no dependencies.
 
 ## How to play
 
@@ -82,11 +125,6 @@ just a worse day.
 At day end: receipt (waste and corner-shop lines included) → analytics →
 shop (Equipment / Menu / Restock / Analytics / Goals) → day board → next
 day. Auto-saves at end of day; **V1 and V2 saves migrate automatically**.
-
-## Audio
-
-🎚 in the HUD opens music/SFX volume sliders. The soundtrack is generative
-and reads the room — rush days run faster, critic days run tenser.
 
 ## For playtesters
 
