@@ -47,8 +47,14 @@ export function ensureNextDay(state) {
     }
   }
 
-  // tomorrow's event (if any) — rolled now so restock can see it coming
-  const event = rollNextEvent(state);
+  // tomorrow's event (if any) — rolled now so restock can see it coming.
+  // The hidden admin panel (src/dev/) can force the outcome once; the
+  // override is consumed here and never survives into normal play.
+  let event = rollNextEvent(state);
+  if (state.devForceEvent !== undefined) {
+    event = state.devForceEvent;
+    delete state.devForceEvent;
+  }
 
   state.nextDay = { day: state.day, specials, goal, preorders, event };
   return state.nextDay;

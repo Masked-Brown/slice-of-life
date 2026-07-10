@@ -16,78 +16,88 @@ import { Telemetry } from '../telemetry.js';
 
 let ui = null;
 
+// ---- bank the day -----------------------------------------------------
+// Unsold perishables age overnight; expired batches are binned here so
+// the receipt, analytics and telemetry all see the same waste numbers.
+// Everything that makes the day "count" — the analytics record, telemetry,
+// the day roll, tomorrow's plan, late milestones — happens in this one
+// place. The receipt scene calls it on enter; the hidden admin panel's
+// fast-forward (src/dev/) calls it directly for days it never shows.
+export function bankDay(state, stats) {
+  const waste = expireDay(state);
+  const wasteCost = Object.values(waste).reduce((a, w) => a + w.cost, 0);
+  const wasteN = Object.values(waste).reduce((a, w) => a + w.n, 0);
+
+  const restockSpend = state.carriedRestockSpend;
+  state.lastDay = {
+    day: stats.day, served: stats.served, lost: stats.lost,
+    sales: stats.sales, tips: stats.tips, bonus: stats.bonus,
+    restockSpend,
+    emergency: stats.emergency || 0,
+    waste, wasteCost, wasteN,
+    gradeUplift: stats.gradeUplift || 0,
+    gradeUnits: stats.gradeUnits || {},
+    sideRevenue: stats.sideRevenue || {},
+    sidesSold: stats.sidesSold || 0,
+    satAvg: stats.satAvg, rating: stats.ratingAfter,
+    used: stats.used, toppingRevenue: stats.toppingRevenue,
+    goalHit: stats.goalHit, goalDesc: stats.goalDesc, goalReward: stats.goalReward,
+  };
+  state.carriedRestockSpend = 0;
+  // lifetime counters the milestones watch
+  if (stats.event) state.stats.eventsSeen = (state.stats.eventsSeen | 0) + 1;
+  if (wasteN === 0 && stats.day > 3) {
+    state.stats.zeroWasteDays = (state.stats.zeroWasteDays | 0) + 1;
+  }
+  const sideRevTotal = Object.values(stats.sideRevenue || {}).reduce((a, b) => a + b, 0);
+  const dayProfit = stats.sales + stats.tips + stats.bonus + sideRevTotal - restockSpend
+    - (stats.emergency || 0);
+  state.stats.bestDayProfit = Math.max(state.stats.bestDayProfit, dayProfit);
+  state.lifetime.days += 1;
+
+  Telemetry.log('day_end', {
+    served: stats.served, lost: stats.lost,
+    sales: Math.round(stats.sales), tips: Math.round(stats.tips),
+    bonus: Math.round(stats.bonus), restockSpend: Math.round(restockSpend * 100) / 100,
+    satAvg: Math.round(stats.satAvg), rating: Math.round(stats.ratingAfter * 10) / 10,
+    money: Math.round(state.money),
+    wasteCost: Math.round(wasteCost * 100) / 100, wasteN,
+    emergency: Math.round((stats.emergency || 0) * 100) / 100,
+    preorders: stats.preordersTaken || 0, preordersLate: stats.preordersLate || 0,
+    sidesSold: stats.sidesSold || 0,
+    event: stats.event || null,
+  });
+
+  state.day += 1;
+  state.phase = 'shop';
+  ensureNextDay(state);                    // tomorrow's specials + goal, for the shop
+
+  // milestones that settle at close of books (profit/earnings)
+  const lateHits = checkMilestones(state);
+  let lateBonus = 0;
+  for (const def of lateHits) {
+    state.money += def.reward;
+    lateBonus += def.reward;
+  }
+  state.lastDay.bonus += lateBonus;
+  // late XP (milestones settled here); the celebration waits for the
+  // receipt — the card shows on the way out to the shop
+  let pendingLevel = null;
+  if (lateHits.length) {
+    const lv = awardXP(state, lateHits.length * BAL.XP.MILESTONE);
+    if (lv.to > lv.from) pendingLevel = lv;
+  }
+  saveGame(state);
+
+  return { wasteCost, wasteN, restockSpend, lateHits, lateBonus, pendingLevel };
+}
+
 export const DayEndScene = {
 
   enter(g, stats) {
     const state = g.state;
-
-    // ---- bank the day -------------------------------------------------
-    // unsold perishables age overnight; expired batches are binned here so
-    // the receipt, analytics and telemetry all see the same waste numbers
-    const waste = expireDay(state);
-    const wasteCost = Object.values(waste).reduce((a, w) => a + w.cost, 0);
-    const wasteN = Object.values(waste).reduce((a, w) => a + w.n, 0);
-
-    const restockSpend = state.carriedRestockSpend;
-    state.lastDay = {
-      day: stats.day, served: stats.served, lost: stats.lost,
-      sales: stats.sales, tips: stats.tips, bonus: stats.bonus,
-      restockSpend,
-      emergency: stats.emergency || 0,
-      waste, wasteCost, wasteN,
-      gradeUplift: stats.gradeUplift || 0,
-      gradeUnits: stats.gradeUnits || {},
-      sideRevenue: stats.sideRevenue || {},
-      sidesSold: stats.sidesSold || 0,
-      satAvg: stats.satAvg, rating: stats.ratingAfter,
-      used: stats.used, toppingRevenue: stats.toppingRevenue,
-      goalHit: stats.goalHit, goalDesc: stats.goalDesc, goalReward: stats.goalReward,
-    };
-    state.carriedRestockSpend = 0;
-    // lifetime counters the milestones watch
-    if (stats.event) state.stats.eventsSeen = (state.stats.eventsSeen | 0) + 1;
-    if (wasteN === 0 && stats.day > 3) {
-      state.stats.zeroWasteDays = (state.stats.zeroWasteDays | 0) + 1;
-    }
-    const sideRevTotal = Object.values(stats.sideRevenue || {}).reduce((a, b) => a + b, 0);
-    const dayProfit = stats.sales + stats.tips + stats.bonus + sideRevTotal - restockSpend
-      - (stats.emergency || 0);
-    state.stats.bestDayProfit = Math.max(state.stats.bestDayProfit, dayProfit);
-    state.lifetime.days += 1;
-
-    Telemetry.log('day_end', {
-      served: stats.served, lost: stats.lost,
-      sales: Math.round(stats.sales), tips: Math.round(stats.tips),
-      bonus: Math.round(stats.bonus), restockSpend: Math.round(restockSpend * 100) / 100,
-      satAvg: Math.round(stats.satAvg), rating: Math.round(stats.ratingAfter * 10) / 10,
-      money: Math.round(state.money),
-      wasteCost: Math.round(wasteCost * 100) / 100, wasteN,
-      emergency: Math.round((stats.emergency || 0) * 100) / 100,
-      preorders: stats.preordersTaken || 0, preordersLate: stats.preordersLate || 0,
-      sidesSold: stats.sidesSold || 0,
-      event: stats.event || null,
-    });
-
-    state.day += 1;
-    state.phase = 'shop';
-    ensureNextDay(state);                    // tomorrow's specials + goal, for the shop
-
-    // milestones that settle at close of books (profit/earnings)
-    const lateHits = checkMilestones(state);
-    let lateBonus = 0;
-    for (const def of lateHits) {
-      state.money += def.reward;
-      lateBonus += def.reward;
-    }
-    state.lastDay.bonus += lateBonus;
-    // late XP (milestones settled here); the celebration waits for the
-    // receipt — the card shows on the way out to the shop
-    let pendingLevel = null;
-    if (lateHits.length) {
-      const lv = awardXP(state, lateHits.length * BAL.XP.MILESTONE);
-      if (lv.to > lv.from) pendingLevel = lv;
-    }
-    saveGame(state);
+    const { wasteCost, wasteN, restockSpend, lateHits, lateBonus, pendingLevel } =
+      bankDay(state, stats);
 
     const el = g.dom.dayend;
     el.classList.remove('hidden');

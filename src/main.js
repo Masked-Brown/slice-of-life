@@ -194,6 +194,11 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+// hidden admin/dev panel gate — resolved BEFORE telemetry starts so every
+// event of a dev session (session_start included) carries the dev tag
+const ADMIN = new URLSearchParams(location.search).get('admin') === '1';
+if (ADMIN) Telemetry.markDev();
+
 // telemetry context rides along on every event (local only, no PII)
 Telemetry.init(() => ({
   day: game.state.day,
@@ -207,3 +212,10 @@ requestAnimationFrame(frame);
 
 // debug/testing handle (also handy in the browser console)
 window.__game = game;
+
+// the panel module is only ever fetched behind ?admin=1, so a normal shared
+// link carries no trace of it, not even in the DOM. Once loaded it still
+// needs Ctrl+Shift+A to open (see src/dev/admin.js).
+if (ADMIN) {
+  import('./dev/admin.js').then(m => m.Admin.init(game));
+}

@@ -11,6 +11,7 @@ let events = [];
 let sessionId = null;
 let getContext = () => ({});           // () => { day, level, screen }
 let panel = null;
+let devSession = false;                // admin panel loaded — tag everything
 
 function load() {
   try { events = JSON.parse(localStorage.getItem(KEY)) || []; }
@@ -53,10 +54,18 @@ export const Telemetry = {
   },
 
   log(type, data = {}) {
-    events.push({ t: Date.now(), sid: sessionId, type, ...getContext(), ...data });
+    const e = { t: Date.now(), sid: sessionId, type, ...getContext(), ...data };
+    // dev/testing sessions must never pass for real player behaviour:
+    // once the admin panel is loaded, every event this session carries
+    // dev:true so downstream reads can filter it out.
+    if (devSession) e.dev = true;
+    events.push(e);
     persist();
     if (panel && !panel.hidden) this._renderPanel();
   },
+
+  // dev/admin sessions call this before init so even session_start is tagged
+  markDev() { devSession = true; },
 
   all() { return events; },
 
@@ -77,8 +86,10 @@ export const Telemetry = {
       wasteCost: 0, restockSpend: 0,
       goalsHit: 0, milestones: 0, eventsSeen: {},
       sessionEnds: [],
+      devEvents: 0,
     };
     for (const e of events) {
+      if (e.dev) s.devEvents++;
       if (e.day) s.dayReached = Math.max(s.dayReached, e.day);
       if (e.level) s.levelReached = Math.max(s.levelReached, e.level);
       if (e.type === 'purchase') s.purchases.push(e.item);
@@ -154,6 +165,7 @@ export const Telemetry = {
       <div>served <b>${s.served}</b> · walk-outs <b>${s.walkouts}</b> · stockout orders <b>${s.stockouts}</b></div>
       <div>waste £<b>${s.wasteCost.toFixed(2)}</b> of £<b>${s.restockSpend.toFixed(2)}</b> restock (<b>${s.wastePct}%</b>)</div>
       <div>goals <b>${s.goalsHit}</b> · milestones <b>${s.milestones}</b></div>
+      ${s.devEvents ? `<div style="color:#ff8a70">⚠ ${s.devEvents} dev-tagged events (filter on e.dev)</div>` : ''}
       <div style="margin-top:6px;color:#cbbda4">level curve</div><div>${lvls}</div>
       <div style="margin-top:6px;color:#cbbda4">recent purchases</div><div>${purch}</div>
       <div style="margin-top:6px;color:#cbbda4">events seen</div><div>${evs}</div>
